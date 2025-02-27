@@ -1,5 +1,0 @@
-library(readr)
-
-Harris_Poll_Scraped_Data_2019_2024 <- read_csv("~/Library/CloudStorage/OneDrive-bates.edu/Econ Thesis/Data/Harris Poll Scraped Data 2019-2024.csv")
-
-

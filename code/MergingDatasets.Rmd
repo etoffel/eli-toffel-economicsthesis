@@ -1,0 +1,3 @@
+library(readr)
+
+Cleaned_Harris_Poll_Scraped_Data_2019_2024 <- read_csv("data/Cleaned Data/Cleaned Harris Poll Data.csv")
