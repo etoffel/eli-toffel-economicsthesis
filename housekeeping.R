@@ -1,13 +1,12 @@
 # Housekeeping.R
-# By: Your Name
+# By: Eli Toffel
 # Date: YYYY-MM-DD
 # What: This script loads the packages and data needed for the paper.
 
-## Package installation -- uncomment if running for the first time
-#install.packages(c('here','tidyverse'))
-library(here)
-library(tidyverse)
-library(haven)
+
+if (!requireNamespace("pacman", quietly =TRUE)) install.packages("pacman")
+pacman::p_load(tidyverse,fuzzyjoin,tidygeocoder,plm, tigris, sf, fixest, prettymapr, ggspatial, knitr, kableExtra)
+
 
 ## Directory creation
 
@@ -18,6 +17,7 @@ raw_dir <- here::here(data_dir,'raw')
 clean_dir <- here::here(data_dir,'clean')
 output_dir <- here::here('output')
 code_dir <- here::here('code')
+work_dir <- here::here(data_dir, 'work')
 processing_dir <- here::here(code_dir,'processing')
 analysis_dir <- here::here(code_dir,'analysis')
 documentation_dir <- here::here('documentation')
@@ -31,4 +31,5 @@ suppressWarnings({
     dir.create(processing_dir)
     dir.create(analysis_dir)
     dir.create(output_dir)
+    dir.create(work_dir)
 })
