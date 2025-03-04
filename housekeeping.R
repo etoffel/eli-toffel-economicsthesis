@@ -21,6 +21,8 @@ work_dir <- here::here(data_dir, 'work')
 processing_dir <- here::here(code_dir,'processing')
 analysis_dir <- here::here(code_dir,'analysis')
 documentation_dir <- here::here('documentation')
+cleaning_dir <- here::here(processing_dir,'cleaning')
+merging_dir <- here::here(processing_dir, 'merging')
 
 suppressWarnings({
     dir.create(data_dir)
@@ -32,4 +34,6 @@ suppressWarnings({
     dir.create(analysis_dir)
     dir.create(output_dir)
     dir.create(work_dir)
+    dir.create(cleaning_dir)
+    dir.create(merging_dir)
 })
