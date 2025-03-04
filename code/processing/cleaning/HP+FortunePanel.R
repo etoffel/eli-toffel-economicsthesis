@@ -13,3 +13,4 @@ continuous_df <- MergedPanel %>%
   select(-industry, -sector, -headquarters_state, -headquarters_city, 
          -founder_is_ceo, -female_ceo, -newcomer_to_fortune_500, -global_500)
 
+View(MergedPanel)
