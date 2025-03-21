@@ -1,7 +1,4 @@
-library(dplyr)
-library(fixest)
-library(ggplot2)
-library(lubridate)
+source('housekeeping.R')
 
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
@@ -123,15 +120,9 @@ merged_data2 <- merged_data2 %>%
 merged_data2 <- merged_data2 %>%
   left_join(revenue_data, by = c("Unique_ID" = "Unique ID", "Year.x" = "Year"))
 
-View(merged_data2)
-
+### Making revenue numeric
 merged_data2 <- merged_data2 %>%
   mutate(Revenue.y = as.numeric(gsub("[$,]", "", Revenue.y)))
-
-event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Treated, ref = -1) + Revenue.y | Unique_ID + Year.x, 
-                           data = merged_data2)
-
-summary(event_study_model)
 
 ########## Seperating the target types into 4 categories
 merged_data3 <- merged_data2 %>%
@@ -142,32 +133,91 @@ merged_data3 <- merged_data2 %>%
     TRUE ~ "Other"
   ))
 
-event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) + Revenue.y | Unique_ID + Year.x, 
+### Regressions
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) + Revenue.y | 
+                             Unique_ID + Year.x, 
                            data = merged_data3)
-summary(event_study_model)
 
+summary(event_study_model)
 View(merged_data3)
 
-event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) * Treated + Revenue.y | Unique_ID + Year.x, 
-                           data = merged_data3)
-summary(event_study_model)
 
-######## Heterogeniety
+### Visualizing
 
-##Published Plan
-merged_data4 <- merged_data3 %>%
+# Extract coefficients and confidence intervals
+event_results <- tidy(event_study_model, conf.int = TRUE)
+
+colnames(event_results)
+unique(event_results$term)
+
+
+event_results <- event_results %>%
   mutate(
-    Published_Plan = as.factor(Published_Plan),
-    Carbon_Credits = as.factor(Carbon_Credits),
-    Accountability_delivery = as.factor(Accountability_delivery)
-  )
-View(merged_data4)
+    Years_to_Pledge = str_extract(term, "-?\\d+"),  # Extract numeric values (includes negatives)
+    Target_Category = str_extract(term, "(?<=Target_Category::).*")  # Extract everything after Target_Category::
+  ) %>%
+  mutate(Years_to_Pledge = as.numeric(Years_to_Pledge))  # Convert Years_to_Pledge to numeric
 
-event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) * Published_Plan + Revenue.y | 
-                             Unique_ID + Year.x, 
-                           data = merged_data4)
-summary(event_study_model)
+unique(event_results$Years_to_Pledge)
+unique(event_results$Target_Category)
+event_results %>% filter(is.na(Years_to_Pledge) | is.na(Target_Category))
 
+event_results <- event_results %>%
+  filter(!str_detect(term, "Revenue"))
+
+ggplot(event_results, aes(x = Years_to_Pledge, y = estimate, 
+                          color = Target_Category, group = Target_Category)) +
+  geom_point(size = 3) +  
+  geom_line() +  
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +  
+  geom_vline(xintercept = -1, linetype = "dashed", color = "red") +  
+  theme_minimal() +
+  labs(title = "Event Study: Stock Price Response to Carbon Pledge",
+       x = "Years Relative to Pledge",
+       y = "Estimated Effect on Stock Price",
+       color = "Target Category") +
+  theme(legend.position = "bottom")
+
+
+library(tidyr)
+library(dplyr)
+
+# Ensure the term column is properly split
+event_results <- event_results %>%
+  filter(str_detect(term, "Years_to_Pledge")) %>%
+  separate(term, into = c("Years_to_Pledge", "Target_Category"), sep = "::Target_Category::", extra = "merge") %>%
+  mutate(Years_to_Pledge = gsub("Years_to_Pledge::", "", Years_to_Pledge)) %>%
+  mutate(Years_to_Pledge = as.numeric(Years_to_Pledge))  # Convert to numeric
+
+ggplot(event_results, aes(x = Years_to_Pledge, y = estimate, 
+                          color = Target_Category, group = Target_Category)) +
+  geom_point(size = 3) +  # Show point estimates
+  geom_line() +  # Connect the estimates
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +  # Confidence intervals
+  geom_vline(xintercept = -1, linetype = "dashed", color = "red") +  # Reference line at event year
+  theme_minimal() +
+  labs(title = "Event Study: Stock Price Response to Carbon Pledge",
+       x = "Years Relative to Pledge",
+       y = "Estimated Effect on Stock Price",
+       color = "Target Category") +
+  theme(legend.position = "bottom")
+
+
+### Visualization
+library(knitr)
+
+event_results %>%
+  select(Years_to_Pledge, Target_Category, estimate, std.error, p.value, conf.low, conf.high) %>%
+  arrange(Years_to_Pledge) %>%
+  kable(digits = 3, caption = "Event Study Results: Stock Price Response to Carbon Pledge")
+library(stargazer)
+
+stargazer(event_results, type = "text", summary = FALSE,
+          title = "Event Study Results: Stock Price Response to Carbon Pledge",
+          digits = 3)
+
+###
+write.csv(merged_data3, "data/clean/Avg_Stock_Cleaned.csv", row.names = FALSE)
 
 
 

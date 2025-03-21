@@ -5,7 +5,7 @@
 
 
 if (!requireNamespace("pacman", quietly =TRUE)) install.packages("pacman")
-pacman::p_load(tidyverse,fuzzyjoin,tidygeocoder,plm, tigris, sf, fixest, prettymapr, ggspatial, knitr, kableExtra)
+pacman::p_load(tidyverse,dplyr,fuzzyjoin,stringr,broom,ggplot2,lubridate,tidygeocoder,plm, tigris, sf, fixest, prettymapr, ggspatial, knitr, kableExtra)
 
 
 ## Directory creation
