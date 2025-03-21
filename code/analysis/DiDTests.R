@@ -5,16 +5,13 @@ library(lubridate)
 
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
+revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
+View(revenue_data)
 
-library(dplyr)
 
 # Merge by Unique ID and Year
 merged_data2 <- stock_data %>%
   left_join(carbon_neutral, by = "Unique ID")
-
-library(dplyr)
-
-library(dplyr)
 
 merged_data2 <- merged_data2 %>%
   rename(
@@ -55,8 +52,11 @@ merged_data2 <- merged_data2 %>%
     Additional_Notes = `Notes`  # Renamed the second "Notes" to avoid duplication
   )
 
+# Fixing mistaken inputs
+merged_data2 <- merged_data2 %>%
+  mutate(Year.x = ifelse(Year.x == 25, 2025, Year.x))
 
-
+#Creating quartiles to filter out outliars
 Q1 <- quantile(merged_data2$Avg_Stock_Price, 0.25, na.rm = TRUE)  # First quartile
 Q3 <- quantile(merged_data2$Avg_Stock_Price, 0.75, na.rm = TRUE)  # Third quartile
 IQR_value <- Q3 - Q1  # Calculate IQR
@@ -65,7 +65,7 @@ IQR_value <- Q3 - Q1  # Calculate IQR
 lower_bound <- Q1 - 1.5 * IQR_value
 upper_bound <- Q3 + 1.5 * IQR_value
 
-# Filter out extreme outliers
+# Filter out extreme outliars
 cleaned_data <- merged_data2 %>%
   filter(Avg_Stock_Price >= lower_bound & Avg_Stock_Price <= upper_bound)
 
@@ -80,17 +80,30 @@ ggplot(merged_data2, aes(x = End_Target, y = Avg_Stock_Price, fill = End_Target)
   theme_minimal()
 
 #####################
-
 merged_data2 <- merged_data2 %>%
-  mutate(
-    Post_Pledge = ifelse(Year.x >= Year.y, 1, 0)  # 1 if after pledge year, 0 otherwise
-  )
+  filter(!is.na(Avg_Stock_Price))
 
 
 merged_data2 <- merged_data2 %>%
   mutate(
-    Event_Year = Year.x - Year.y  # Now subtract properly
+    Treated = ifelse(!is.na(Year.y) & Year.y != 0, 1, 0)
   )
+
+merged_data2 <- merged_data2 %>%
+  mutate(
+    Post_Pledge = ifelse(Treated == 0, 0,  # All untreated firms get Post_Pledge = 0
+                         ifelse(Year.x >= Year.y, 1, 0))  # Treated firms follow the pledge year rule
+  )
+
+# Compute the median pledge year across treated firms
+median_pledge_year <- median(merged_data2$Year.y[merged_data2$Treated == 1], na.rm = TRUE)
+
+# Assign untreated firms a placebo pledge year
+merged_data2 <- merged_data2 %>%
+  mutate(Years_to_Pledge = ifelse(Treated == 1, Year.x - Year.y,  # Treated firms use real pledge year
+                                  Year.x - median_pledge_year)) 
+
+View(merged_data2)
 
 ggplot(merged_data2, aes(x = as.factor(Post_Pledge), y = Avg_Stock_Price, fill = as.factor(Post_Pledge))) +
   geom_boxplot() +
@@ -99,34 +112,62 @@ ggplot(merged_data2, aes(x = as.factor(Post_Pledge), y = Avg_Stock_Price, fill =
        y = "Average Stock Price") +
   theme_minimal()
 
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Treated, ref = -1) + Revenue | Unique_ID + Year.x, 
+                           data = merged_data2)
+
+######## Adding Revenue to the regression
+
 merged_data2 <- merged_data2 %>%
+  filter(Year.x != 2025)  # Exclude 2025 observations
+
+merged_data2 <- merged_data2 %>%
+  left_join(revenue_data, by = c("Unique_ID" = "Unique ID", "Year.x" = "Year"))
+
+View(merged_data2)
+
+merged_data2 <- merged_data2 %>%
+  mutate(Revenue.y = as.numeric(gsub("[$,]", "", Revenue.y)))
+
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Treated, ref = -1) + Revenue.y | Unique_ID + Year.x, 
+                           data = merged_data2)
+
+summary(event_study_model)
+
+########## Seperating the target types into 4 categories
+merged_data3 <- merged_data2 %>%
+  mutate(Target_Category = case_when(
+    End_Target %in% c("Net zero", "Carbon neutral(ity)") ~ "Net Zero",
+    End_Target %in% c("Emissions reduction target", "Science-Based Target") ~ "Reduction",
+    End_Target %in% c("No target") ~ "No Target",
+    TRUE ~ "Other"
+  ))
+
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) + Revenue.y | Unique_ID + Year.x, 
+                           data = merged_data3)
+summary(event_study_model)
+
+View(merged_data3)
+
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) * Treated + Revenue.y | Unique_ID + Year.x, 
+                           data = merged_data3)
+summary(event_study_model)
+
+######## Heterogeniety
+
+##Published Plan
+merged_data4 <- merged_data3 %>%
   mutate(
-    Treated = ifelse(!is.na(Year.y), 1, 0)  # 1 if company made a pledge
+    Published_Plan = as.factor(Published_Plan),
+    Carbon_Credits = as.factor(Carbon_Credits),
+    Accountability_delivery = as.factor(Accountability_delivery)
   )
+View(merged_data4)
+
+event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) * Published_Plan + Revenue.y | 
+                             Unique_ID + Year.x, 
+                           data = merged_data4)
+summary(event_study_model)
 
 
-# Difference-in-Differences Model: Stock Price ~ Treatment & Post-Pledge Interaction
-did_model <- feols(Avg_Stock_Price ~ Treated * Post_Pledge + Industry + Employees | Unique_ID + Year.x, 
-                   data = merged_data2)
 
-# View Results
-summary(did_model)
-
-library(fixest)
-
-did_model_fixed <- feols(Avg_Stock_Price ~ Treated * Post_Pledge + Employees | Unique_ID + Year.x, 
-                         cluster = "Unique_ID", data = merged_data2)
-
-summary(did_model_fixed)
-
-#Parallel Trends
-merged_data2 <- merged_data2 %>%
-  mutate(Event_Year = Year.x - Year.y)
-
-ggplot(merged_data2, aes(x = Event_Year, y = Avg_Stock_Price)) +
-  geom_smooth(method = "loess", se = TRUE, color = "blue") +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Stock Price Changes Relative to Carbon Pledge Year",
-       x = "Years Since Pledge", y = "Average Stock Price") +
-  theme_minimal()
 
