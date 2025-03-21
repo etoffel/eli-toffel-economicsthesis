@@ -53,6 +53,12 @@ merged_data2 <- merged_data2 %>%
 merged_data2 <- merged_data2 %>%
   mutate(Year.x = ifelse(Year.x == 25, 2025, Year.x))
 
+merged_data2 <- merged_data2 %>%
+  mutate(End_Target = ifelse(Unique_ID == 98 & Company.x == "Yum! Brands", "Net zero", End_Target))
+
+merged_data2 <- merged_data2 %>%
+  mutate(End_Target = ifelse(Unique_ID == 60 & Company.x == "Netflix", "Net zero", End_Target))
+
 #Creating quartiles to filter out outliars
 Q1 <- quantile(merged_data2$Avg_Stock_Price, 0.25, na.rm = TRUE)  # First quartile
 Q3 <- quantile(merged_data2$Avg_Stock_Price, 0.75, na.rm = TRUE)  # Third quartile
@@ -140,6 +146,11 @@ event_study_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category,
 
 summary(event_study_model)
 View(merged_data3)
+
+treated_only_model <- feols(Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) + Revenue.y | 
+                              Unique_ID + Year.x, 
+                            data = merged_data3 %>% filter(Treated == 1))
+summary(treated_only_model)
 
 
 ### Visualizing
