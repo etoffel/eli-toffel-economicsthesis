@@ -3,9 +3,9 @@ source('housekeeping.R')
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
 revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
-View(revenue_data)
 
-#Fixing Unique ID Misnaming
+
+##### Fixing Unique Misnaming
 # For stock_data
 stock_data <- stock_data %>%
   mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
@@ -59,6 +59,11 @@ merged_data2 <- merged_data2 %>%
   )
 
 # Fixing mistaken inputs
+
+merged_data2 <- merged_data2 %>%
+  mutate(Year.y = ifelse(Unique_ID == 18, 2021, Year.y))
+
+View(carbon_neutral)
 merged_data2 <- merged_data2 %>%
   mutate(Year.x = ifelse(Year.x == 25, 2025, Year.x))
 

@@ -54,4 +54,10 @@ staggered_did <- feols(Reputation_Score ~ sunab(Year.y, Year.x) |
                          Unique_ID + Year.x, 
                        data = reputation_data_merge)
 View(reputation_data_merge)
+
 summary(staggered_did)
+
+iplot(staggered_did,
+      main = "Staggered DiD: Effect on Reputation Score",
+      xlab = "Years Since Pledge",
+      ylab = "Effect on Reputation Score")

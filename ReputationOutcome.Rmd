@@ -1,0 +1,72 @@
+---
+title: "Event Study: Reputation Score and Carbon Pledges"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(fixest)
+library(broom)
+library(modelsummary)
+library(ggplot2)
+```
+
+## 1. Load and Prepare Data
+```{r load-data}
+source("housekeeping.R")
+
+media_change <- read_csv("data/clean/MediaDataPulledTogether.csv") %>%
+  filter(Year.x != 2018)
+
+reputation_data <- read_csv("data/Build 2/Reputation Data.csv") %>%
+  rename(
+    Unique_ID = `Unique ID`,
+    Year.x = Year
+  )
+
+reputation_data_merge <- media_change %>%
+  left_join(reputation_data, by = c("Unique_ID", "Year.x"))
+
+reputation_data_merge <- reputation_data_merge %>%
+  mutate(Year.y = ifelse(Target_Category == "Reduction", 0, Year.y)) %>%
+  filter(Years_to_Pledge <= 10, !is.na(Unique_ID)) %>%
+  mutate(Year.y = ifelse(Year.y == 0, NA, Year.y))
+```
+
+## 2. Event Study Regression on Reputation Score
+```{r event-study-reputation}
+event_study_reputation <- feols(Reputation_Score ~ i(Years_to_Pledge, Target_Category, ref = -1) |
+                                   Unique_ID + Year.x,
+                                 data = reputation_data_merge)
+summary(event_study_reputation)
+```
+
+## 3. Staggered DiD on Reputation Score
+```{r staggered-did-reputation}
+staggered_did <- feols(Reputation_Score ~ sunab(Year.y, Year.x) |
+                         Unique_ID + Year.x,
+                       data = reputation_data_merge)
+summary(staggered_did)
+
+iplot(staggered_did,
+      main = "Staggered DiD: Effect on Reputation Score",
+      xlab = "Years Since Pledge",
+      ylab = "Effect on Reputation Score")
+```
+
+## 4. (Optional) Export Regressions
+```{r export-reputation-models, eval=FALSE}
+modelsummary(
+  list(
+    "Event Study" = event_study_reputation,
+    "Staggered DiD" = staggered_did
+  ),
+  stars = TRUE,
+  estimate = "{estimate} ({std.error})",
+  statistic = "p.value",
+  gof_omit = "IC|Log|Adj|Within|Pseudo|F",
+  output = "output/reputation_event_study.docx"
+)

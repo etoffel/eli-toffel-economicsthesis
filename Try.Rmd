@@ -1,0 +1,111 @@
+---
+title: "Carbon Pledge Annual Change Analysis"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(fixest)
+library(ggplot2)
+library(knitr)
+library(stargazer)
+```
+
+## 1. Load & Prepare Data
+```{r load-data}
+source("housekeeping.R")
+
+avg_stock <- read_csv("data/clean/Avg_Stock_Cleaned.csv")
+
+avg_stock <- avg_stock %>%
+  mutate(
+    Annual_Change = as.numeric(gsub("%", "", Annual_Change)),
+    Year.y = ifelse(Year.y == 0, NA, Year.y)
+  )
+```
+
+## 2. Filter to 2021 Only
+```{r filter-2021-only}
+avg_stock_filtered <- avg_stock %>%
+  filter(Year.x == 2021) %>%
+  mutate(Pledge_2021 = case_when(
+    Year.y == 2021 ~ "Pledged in 2021",
+    is.na(Year.y) | Year.y > 2021 ~ "Not Pledged by 2021",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(Pledge_2021))
+```
+
+## 3. Summary Statistics and T-Test (2021 Only)
+```{r summary-t-test-2021}
+annual_change_summary <- avg_stock_filtered %>%
+  group_by(Pledge_2021) %>%
+  summarize(
+    mean_annual_change = mean(Annual_Change, na.rm = TRUE),
+    sd_annual_change = sd(Annual_Change, na.rm = TRUE),
+    n = n()
+  )
+
+kable(annual_change_summary, caption = "Annual Change in 2021: Pledgers vs Untreated")
+
+t_test_result <- t.test(Annual_Change ~ Pledge_2021, data = avg_stock_filtered, var.equal = TRUE)
+t_test_result
+```
+
+## 4. Regression Analysis (2021 Only)
+```{r regression-2021}
+avg_stock_filtered <- avg_stock_filtered %>% mutate(Pledge_2021 = factor(Pledge_2021))
+
+pledge_effect_model <- feols(Annual_Change ~ Pledge_2021 + Revenue.y, 
+                             data = avg_stock_filtered)
+
+summary(pledge_effect_model)
+```
+
+## 5. Density Plot of Pledge Years
+```{r density-year-y}
+ggplot(avg_stock %>% filter(!is.na(Year.y)), aes(x = Year.y)) +
+  geom_density(fill = "steelblue", alpha = 0.6) +
+  labs(
+    title = "Density of Carbon Pledge Years",
+    x = "Pledge Year (Year.y)",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+## 6. Compare 2022 Stock Price (1 Year After Pledge)
+```{r stock-price-2022}
+# Filter to 2022 only and define pledge groups based on 2021 status
+avg_stock_2022 <- avg_stock %>%
+  filter(Year.x == 2022) %>%
+  mutate(Pledge_2021 = case_when(
+    Year.y == 2021 ~ "Pledged in 2021",
+    is.na(Year.y) | Year.y > 2022 ~ "Not Pledged by 2022",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(Pledge_2021))
+
+# Summary statistics
+stock_summary <- avg_stock_2022 %>%
+  group_by(Pledge_2021) %>%
+  summarize(
+    mean_stock_price = mean(Avg_Stock_Price, na.rm = TRUE),
+    sd_stock_price = sd(Avg_Stock_Price, na.rm = TRUE),
+    n = n()
+  )
+
+kable(stock_summary, caption = "Average Stock Price in 2022: Pledged in 2021 vs Untreated")
+
+# T-test
+stock_price_ttest <- t.test(Avg_Stock_Price ~ Pledge_2021, data = avg_stock_2022, var.equal = TRUE)
+stock_price_ttest
+```
+
+## 7. Save Cleaned Data
+```{r write-cleaned}
+write.csv(avg_stock, "data/clean/Annual_Change.csv", row.names = FALSE)
+```

@@ -1,0 +1,106 @@
+---
+title: "Extended Event Study: Adding Reputation Score to Stock and Media Regressions"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(fixest)
+library(broom)
+library(modelsummary)
+library(ggplot2)
+```
+
+## 1. Load and Merge Datasets
+```{r load-merge-data}
+source("housekeeping.R")
+
+stock_data <- read_csv("data/clean/Avg_Stock_Cleaned.csv")
+media_data <- read_csv("data/clean/MediaDataPulledTogether.csv")
+reputation_data <- read_csv("data/Build 2/Reputation Data.csv") %>%
+  rename(Unique_ID = `Unique ID`, Year.x = Year)
+
+# Merge reputation data into stock and media datasets
+stock_with_rep <- stock_data %>%
+  left_join(reputation_data, by = c("Unique_ID", "Year.x"))
+View(stock_with_rep)
+media_with_rep <- media_data %>%
+  left_join(reputation_data, by = c("Unique_ID", "Year.x"))
+
+# Clean and rename media_data before merging
+media_with_rep <- media_with_rep %>%
+  rename(
+    Media_Articles_Total = `Number of Media Articles Total`,
+    Negative_Business_Articles = `Negative Business Articles`,
+    Negative_Personal_Articles = `Negative Personal Articles`,
+    Nexis_Input = `Input into Nexis`,  # Rename before dropping
+    Parent_Company = `Parent Company`  # Rename before dropping
+  ) %>%
+  select(-Nexis_Input, -Parent_Company)  # Drop unnecessary columns
+
+```
+
+## 2. Stock Regression Including Reputation Score
+```{r stock-reputation-regression}
+stock_model <- feols(
+  Avg_Stock_Price ~ i(Years_to_Pledge, Target_Category, ref = -1) + Revenue.y + Reputation_Score | Unique_ID + Year.x,
+  data = stock_with_rep
+)
+summary(stock_model)
+```
+
+## 3. Media Regression Including Reputation Score
+```{r media-reputation-regression}
+media_model <- feols(
+  Media_Articles_Total ~ i(Years_to_Pledge, Target_Category, ref = -1) + Reputation_Score | Unique_ID + Year.x,
+  data = media_with_rep
+)
+summary(media_model)
+```
+
+## 4. Negative Tone Media Regression with Reputation Score
+```{r tone-reputation-regression}
+media_with_rep <- media_with_rep %>%
+  mutate(
+    Percent_Negative_Business = ifelse(Media_Articles_Total > 0,
+      pmin(Negative_Business_Articles / Media_Articles_Total * 100, 100), NA),
+    Percent_Negative_Personal = ifelse(Media_Articles_Total > 0,
+      pmin(Negative_Personal_Articles / Media_Articles_Total * 100, 100), NA)
+  )
+
+tone_model_business <- feols(
+  Percent_Negative_Business ~ i(Years_to_Pledge, Target_Category, ref = -1) + Reputation_Score | Unique_ID + Year.x,
+  data = media_with_rep
+)
+
+tone_model_personal <- feols(
+  Percent_Negative_Personal ~ i(Years_to_Pledge, Target_Category, ref = -1) + Reputation_Score | Unique_ID + Year.x,
+  data = media_with_rep
+)
+summary()
+summary(tone_model_personal)
+```
+
+## 5. Export Regression Tables (Optional)
+```{r export-regressions, eval=FALSE}
+modelsummary(
+  list(
+    "Stock Price" = stock_model,
+    "Media Coverage" = media_model,
+    "Neg. Business %" = tone_model_business,
+    "Neg. Personal %" = tone_model_personal
+  ),
+  stars = TRUE,
+  estimate = "{estimate} ({std.error})",
+  statistic = "p.value",
+  gof_omit = "IC|Log|Adj|Within|Pseudo|F",
+  output = "output/event_study_with_reputation.docx"
+)
+```
+
+## 6. Notes
+- Reputation_Score is included as a control in all regressions.
+- Interpret the coefficient on Reputation_Score as its effect *conditional on* pledge timing and firm/year fixed effects.
