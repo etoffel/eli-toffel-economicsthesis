@@ -5,6 +5,15 @@ stock_data <- read_csv("data/Build 2/Stock Data.csv")
 revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
 View(revenue_data)
 
+#Fixing Unique ID Misnaming
+# For stock_data
+stock_data <- stock_data %>%
+  mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
+
+# For revenue_data (if it also contains a "Company" column)
+revenue_data <- revenue_data %>%
+  mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
+View(stock_data)
 
 # Merge by Unique ID and Year
 merged_data2 <- stock_data %>%

@@ -38,4 +38,3 @@ summary(pledge_effect_model)
 
 write.csv(avg_stock, "data/clean/Annual_Change.csv", row.names = FALSE)
 
-

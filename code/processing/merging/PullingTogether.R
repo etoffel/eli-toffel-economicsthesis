@@ -10,6 +10,13 @@ media_data <- media_data %>%
     `Unique ID` = `Unique ID'`,
   )
 
+#Fixing Unique ID Misnumbering
+# For stock_data
+media_data <- media_data %>%
+  mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
+
+View(media_data)
+
 # Merge by Unique ID and Year
 merged_data2 <- media_data %>%
   left_join(carbon_neutral, by = "Unique ID")
