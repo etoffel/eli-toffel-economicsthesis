@@ -168,9 +168,10 @@ event_results %>%
 merged_data3 <- merged_data3 %>%
   mutate(Year.y = ifelse(Treated == 0, NA, Year.y))
 
-staggered_stock_did <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) + Revenue.y | 
+staggered_stock_did <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) | 
                                Unique_ID + Year.x, 
                              data = merged_data3)
+
 summary(staggered_stock_did)
 ```
 
@@ -190,10 +191,10 @@ reputation_data <- read_csv("data/Build 2/Reputation Data.csv") %>%
 stock_with_rep <- merged_data3 %>%
   left_join(reputation_data, by = c("Unique_ID", "Year.x"))
 
-## Total Media Staggered DiD
-staggered_did <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) + Revenue.y + Reputation_Score| Unique_ID + Year.x, 
+## Average Stock Price DiD
+staggered_did <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, 
                        data = stock_with_rep)
 summary(staggered_did)
 
-iplot(staggered_did, main = "Staggered DiD: Media Articles", xlab = "Years Since Pledge")
+iplot(staggered_did, main = "Staggered DiD: Average Stock Price", xlab = "Years Since Pledge")
 ```

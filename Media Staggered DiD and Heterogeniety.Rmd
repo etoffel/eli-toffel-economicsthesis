@@ -1,0 +1,202 @@
+---
+title: "Staggered DiD Media Coverage Around Carbon Pledges"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(fixest)
+library(broom)
+library(modelsummary)
+library(ggplot2)
+```
+
+## 1. Load and Prepare Data
+```{r load-data}
+source("housekeeping.R")
+
+pulled_together <- read_csv("data/clean/MediaDataPulledTogether.csv") %>%
+  rename(
+    Media_Articles_Total = `Number of Media Articles Total`,
+    Negative_Business_Articles = `Negative Business Articles`,
+    Negative_Personal_Articles = `Negative Personal Articles`,
+    Nexis_Input = `Input into Nexis`,
+    Parent_Company = `Parent Company`
+  ) %>%
+  select(-Nexis_Input, -Parent_Company) %>%
+  filter(!is.na(Media_Articles_Total), Years_to_Pledge <= 10, !is.na(Unique_ID)) %>%
+  mutate(Year.y = ifelse(Year.y == 0, NA, Year.y))
+```
+
+## 2. Create Share of Negative Media Coverage
+```{r percent-negative}
+pulled_together <- pulled_together %>%
+  mutate(
+    Percent_Negative_Business = ifelse(Media_Articles_Total > 0,
+      pmin(Negative_Business_Articles / Media_Articles_Total * 100, 100), NA),
+    Percent_Negative_Personal = ifelse(Media_Articles_Total > 0,
+      pmin(Negative_Personal_Articles / Media_Articles_Total * 100, 100), NA)
+  )
+```
+
+## 3. Staggered DiDs
+```{r staggered-did-media}
+
+##Total Media Coverage
+staggered_did_total <- feols(Media_Articles_Total ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
+                       data = pulled_together)
+summary(staggered_did_total)
+
+iplot(staggered_did_total, main = "Staggered DiD: Media Articles", xlab = "Years Since Pledge")
+
+## Percent_Negative_Business Staggered DiD
+staggered_did_bus <- feols(Percent_Negative_Business ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, 
+                       data = pulled_together)
+
+summary(staggered_did_bus)
+
+iplot(staggered_did_bus, main = "Staggered DiD: Negative Business Media Articles", xlab = "Years Since Pledge")
+
+## Percent_Negative_Personal Staggered DiD
+staggered_did_pers <- feols(Percent_Negative_Personal ~ sunab(Year.y, Year.x)| Unique_ID + Year.x, 
+                       data = pulled_together)
+
+summary(staggered_did_pers)
+
+iplot(staggered_did_pers, main = "Staggered DiD: Negative Personal Media Articles", xlab = "Years Since Pledge")
+
+View(pulled_together)
+```
+## 4. Carbon Credits Heterogeniety Total Media
+## 4. Carbon Credit Heterogeneity (Combined)
+
+```{r carbon-credit-heterogeneity-all, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+# Helper function to run and plot model
+run_credit_did_plot <- function(data, outcome_var, group_label, y_label) {
+  fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+  model <- feols(fml, data = data)
+  
+  iplot(
+    model,
+    main = paste("Staggered DiD:", y_label, "- Carbon Credits =", group_label),
+    xlab = "Years Since Pledge",
+    ylab = paste("Estimated Effect on", y_label)
+  )
+}
+
+# Define Carbon Credit Groups
+credit_groups <- c("Not Specified", "Yes", "No")
+
+# Define Outcomes and Labels
+outcomes <- list(
+  Media_Articles_Total = "Total Media Articles",
+  Percent_Negative_Business = "% Negative Business Articles",
+  Percent_Negative_Personal = "% Negative Personal Articles"
+)
+
+# Loop through outcomes and carbon credit groups
+for (outcome_var in names(outcomes)) {
+  y_label <- outcomes[[outcome_var]]
+  
+  for (group in credit_groups) {
+    subset_data <- pulled_together %>%
+      filter((Treated == 1 & Carbon_Credits == group) | Treated == 0)
+    
+    run_credit_did_plot(subset_data, outcome_var, group, y_label)
+  }
+}
+```
+
+## 5. Accountability Heterogeneity – Staggered DiD by Media Outcomes
+
+```{r accountability-heterogeneity-media, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+# Load required libraries
+library(fixest)
+library(dplyr)
+
+# Define helper function to run DiD and generate plot
+run_did_plot <- function(data, outcome, group_label, outcome_label) {
+  # Dynamically build the regression formula
+  fml <- as.formula(paste0(outcome, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+  
+  # Estimate the model
+  model <- feols(fml, data = data)
+  
+  # Plot the results
+  iplot(
+    model,
+    main = paste("Staggered DiD:", outcome_label, "- Accountability =", group_label),
+    xlab = "Years Since Pledge",
+    ylab = paste("Effect on", outcome_label)
+  )
+}
+
+# Define accountability groups and outcome labels
+groups <- c("Not Specified", "Yes", "No")
+outcomes <- list(
+  Media_Articles_Total = "Total Media Articles",
+  Percent_Negative_Business = "% Negative Business Articles",
+  Percent_Negative_Personal = "% Negative Personal Articles"
+)
+
+# Loop through each outcome and accountability group
+for (outcome_var in names(outcomes)) {
+  label <- outcomes[[outcome_var]]
+  
+  for (group in groups) {
+    subset_data <- pulled_together %>%
+      filter((Treated == 1 & Accountability_delivery == group) | Treated == 0)
+    
+    run_did_plot(subset_data, outcome_var, group, label)
+  }
+}
+```
+
+## Interim Target Year Heterogeneity – Staggered DiD on Media Outcomes
+
+```{r interim-target-heterogeneity-media, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+# Ensure Interim_Target_Year is numeric
+pulled_together <- pulled_together %>%
+  mutate(Interim_Target_Year = as.numeric(Interim_Target_Year))
+
+# Helper function to run DiD and plot
+run_interim_did_plot <- function(data, outcome_var, label, cutoff_group) {
+  fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+  model <- feols(fml, data = data)
+  
+  iplot(
+    model,
+    main = paste("Staggered DiD:", label, "- Interim Target", cutoff_group),
+    xlab = "Years Since Pledge",
+    ylab = paste("Effect on", label)
+  )
+}
+
+# Define outcomes and labels
+outcomes <- list(
+  Media_Articles_Total = "Total Media Articles",
+  Percent_Negative_Business = "% Negative Business Articles",
+  Percent_Negative_Personal = "% Negative Personal Articles"
+)
+
+# Loop through outcomes and Interim Target year groups
+for (outcome_var in names(outcomes)) {
+  label <- outcomes[[outcome_var]]
+  
+  # Group: Interim_Target_Year > 2000 or untreated
+  subset_after_2000 <- pulled_together %>%
+    filter((Treated == 1 & Interim_Target_Year > 2000) | Treated == 0)
+  
+  run_interim_did_plot(subset_after_2000, outcome_var, label, "> 2000")
+  
+  # Group: Interim_Target_Year < 2000 or untreated
+  subset_before_2000 <- pulled_together %>%
+    filter((Treated == 1 & Interim_Target_Year < 2000) | Treated == 0)
+  
+  run_interim_did_plot(subset_before_2000, outcome_var, label, "< 2000")
+}
+```
+

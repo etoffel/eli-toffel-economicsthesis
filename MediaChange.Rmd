@@ -160,9 +160,6 @@ staggered_did_pers <- feols(Percent_Negative_Personal ~ sunab(Year.y, Year.x)| U
 summary(staggered_did_pers)
 
 iplot(staggered_did_pers, main = "Staggered DiD: Negative Business Media Articles", xlab = "Years Since Pledge")
-
-
-
 ```
 
 ## 8. Filter & Retable Results
