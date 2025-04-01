@@ -5,15 +5,6 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
-library(fixest)
-library(broom)
-library(modelsummary)
-library(ggplot2)
-```
-
 ## 1. Load and Prepare Data
 ```{r load-data}
 source("housekeeping.R")
@@ -40,6 +31,11 @@ pulled_together <- pulled_together %>%
     Percent_Negative_Personal = ifelse(Media_Articles_Total > 0,
       pmin(Negative_Personal_Articles / Media_Articles_Total * 100, 100), NA)
   )
+```
+## 3. Staggered DiDs - Media Coverage
+```{r staggered-did-media, fig.width=10, fig.height=4.5, warning=FALSE, message=FALSE}
+
+
 ```
 
 ## 3. Staggered DiDs
@@ -68,92 +64,159 @@ summary(staggered_did_pers)
 
 iplot(staggered_did_pers, main = "Staggered DiD: Negative Personal Media Articles", xlab = "Years Since Pledge")
 
-View(pulled_together)
-```
-## 4. Carbon Credits Heterogeniety Total Media
-## 4. Carbon Credit Heterogeneity (Combined)
-
-```{r carbon-credit-heterogeneity-all, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
-# Helper function to run and plot model
-run_credit_did_plot <- function(data, outcome_var, group_label, y_label) {
-  fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
-  model <- feols(fml, data = data)
-  
-  iplot(
-    model,
-    main = paste("Staggered DiD:", y_label, "- Carbon Credits =", group_label),
-    xlab = "Years Since Pledge",
-    ylab = paste("Estimated Effect on", y_label)
-  )
+## Plotting Side By Side
+# Helper: Run model
+run_did_model <- function(outcome_var, label) {
+  formula <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+  model <- feols(formula, data = pulled_together)
+  return(list(model = model, label = label))
 }
 
-# Define Carbon Credit Groups
-credit_groups <- c("Not Specified", "Yes", "No")
+# Helper: Convert iplot to grob
+iplot_to_grob <- function(model, main_title) {
+  grid.newpage()
+  temp <- tempfile(fileext = ".png")
+  png(temp, width = 800, height = 600)
+  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Estimated Effect")
+  dev.off()
+  img <- png::readPNG(temp)
+  rasterGrob(img, interpolate = TRUE)
+}
 
-# Define Outcomes and Labels
-outcomes <- list(
-  Media_Articles_Total = "Total Media Articles",
-  Percent_Negative_Business = "% Negative Business Articles",
-  Percent_Negative_Personal = "% Negative Personal Articles"
+# Run models
+total_model <- run_did_model("Media_Articles_Total", "Total Media")
+bus_model   <- run_did_model("Percent_Negative_Business", "Negative Business")
+pers_model  <- run_did_model("Percent_Negative_Personal", "Negative Personal")
+
+# Create grobs
+grob_total <- iplot_to_grob(total_model$model, total_model$label)
+grob_bus   <- iplot_to_grob(bus_model$model, bus_model$label)
+grob_pers  <- iplot_to_grob(pers_model$model, pers_model$label)
+
+# Combine in a grid
+grid.arrange(
+  grobs = list(grob_total, grob_bus, grob_pers),
+  ncol = 3,
+  top = textGrob("Figure X: Staggered DiD - Media Coverage", gp = gpar(fontsize = 14, fontface = "bold")),
+  padding = unit(0.5, "line")
 )
 
-# Loop through outcomes and carbon credit groups
+## Tabling
+# Helper to extract DiD terms
+extract_did <- function(model, label) {
+  tidy(model) %>%
+    filter(grepl("Year.x::", term)) %>%
+    mutate(
+      event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
+      estimate = round(estimate, 2),
+      std.error = round(std.error, 2)
+    ) %>%
+    select(event_time, estimate, std.error) %>%
+    pivot_longer(cols = c(estimate, std.error), names_to = "type", values_to = "value") %>%
+    mutate(row_label = ifelse(type == "estimate", label, paste(label, "SE"))) %>%
+    select(row_label, event_time, value)
+}
+
+# Extract and combine
+table_total <- extract_did(total_model$model, total_model$label)
+table_bus   <- extract_did(bus_model$model, bus_model$label)
+table_pers  <- extract_did(pers_model$model, pers_model$label)
+
+combined_table <- bind_rows(table_total, table_bus, table_pers) %>%
+  pivot_wider(names_from = event_time, values_from = value)
+
+# Display table
+gt(combined_table) %>%
+  tab_header(title = "Table 6. Media Coverage (Staggered DiD Estimates)") %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+```
+## 4. Carbon Credit Heterogeneity (Combined)
+```{r carbon-credit-did-9plots-percent-negatives, warning=FALSE, message=FALSE, fig.width=9, fig.height=9}
+# Load required packages
+library(tidyverse)
+library(fixest)
+library(broom)
+library(gt)
+library(grid)
+library(gridExtra)
+library(png)
+
+# --- Helper to extract estimates only
+extract_estimates_only <- function(model, outcome_label, group_label) {
+  tidy(model) %>%
+    filter(str_detect(term, "Year\\.x::")) %>%
+    mutate(
+      event_time = str_replace(term, "Year\\.x::", "Year "),
+      row_label = paste(outcome_label, "-", group_label),
+      estimate = round(estimate, 2)
+    ) %>%
+    select(row_label, event_time, estimate)
+}
+
+# --- Helper to convert iplot() to grob
+iplot_to_grob <- function(model, main_title) {
+  temp <- tempfile(fileext = ".png")
+  png(temp, width = 600, height = 500)
+  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Effect")
+  dev.off()
+  img <- png::readPNG(temp)
+  rasterGrob(img, interpolate = TRUE)
+}
+
+# --- Outcomes and labels
+outcomes <- list(
+  Media_Articles_Total = "Total Media",
+  Percent_Negative_Business = "% Negative Business",
+  Percent_Negative_Personal = "% Negative Personal"
+)
+credit_groups <- c("Not Specified", "Yes", "No")
+
+# --- Initialize containers
+estimates_list <- list()
+iplot_grobs <- list()
+
+# --- Run models and plots
 for (outcome_var in names(outcomes)) {
-  y_label <- outcomes[[outcome_var]]
-  
   for (group in credit_groups) {
+    label <- outcomes[[outcome_var]]
+    display_label <- paste(label, "-", group)
+    
     subset_data <- pulled_together %>%
       filter((Treated == 1 & Carbon_Credits == group) | Treated == 0)
     
-    run_credit_did_plot(subset_data, outcome_var, group, y_label)
+    fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+    model <- feols(fml, data = subset_data)
+    
+    # Save estimates and plots
+    estimates_list[[display_label]] <- extract_estimates_only(model, label, group)
+    iplot_grobs[[display_label]] <- iplot_to_grob(model, display_label)
   }
 }
-```
 
-## 5. Accountability Heterogeneity – Staggered DiD by Media Outcomes
+# # --- Table of Estimates (no SE)
+# combined_table <- bind_rows(estimates_list) %>%
+#   pivot_wider(names_from = event_time, values_from = estimate)
+# 
+# gt(combined_table) %>%
+#   tab_header(title = "Table 7. Staggered DiD Estimates (Percent Negatives + Total Media)") %>%
+#   tab_style(
+#     style = cell_text(weight = "bold"),
+#     locations = cells_column_labels(everything())
+#   )
 
-```{r accountability-heterogeneity-media, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
-# Load required libraries
-library(fixest)
-library(dplyr)
-
-# Define helper function to run DiD and generate plot
-run_did_plot <- function(data, outcome, group_label, outcome_label) {
-  # Dynamically build the regression formula
-  fml <- as.formula(paste0(outcome, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
-  
-  # Estimate the model
-  model <- feols(fml, data = data)
-  
-  # Plot the results
-  iplot(
-    model,
-    main = paste("Staggered DiD:", outcome_label, "- Accountability =", group_label),
-    xlab = "Years Since Pledge",
-    ylab = paste("Effect on", outcome_label)
-  )
-}
-
-# Define accountability groups and outcome labels
-groups <- c("Not Specified", "Yes", "No")
-outcomes <- list(
-  Media_Articles_Total = "Total Media Articles",
-  Percent_Negative_Business = "% Negative Business Articles",
-  Percent_Negative_Personal = "% Negative Personal Articles"
+# --- Plot all 9 results
+grid.arrange(
+  grobs = iplot_grobs,
+  ncol = 3,
+  top = textGrob("Figure 7: Staggered DiD by Carbon Credit Group and Media Outcome",
+                 gp = gpar(fontsize = 14, fontface = "bold"))
 )
 
-# Loop through each outcome and accountability group
-for (outcome_var in names(outcomes)) {
-  label <- outcomes[[outcome_var]]
-  
-  for (group in groups) {
-    subset_data <- pulled_together %>%
-      filter((Treated == 1 & Accountability_delivery == group) | Treated == 0)
-    
-    run_did_plot(subset_data, outcome_var, group, label)
-  }
-}
 ```
+
 
 ## Interim Target Year Heterogeneity – Staggered DiD on Media Outcomes
 
@@ -198,5 +261,208 @@ for (outcome_var in names(outcomes)) {
   
   run_interim_did_plot(subset_before_2000, outcome_var, label, "< 2000")
 }
-```
 
+# Ensure Interim_Target_Year is numeric
+pulled_together <- pulled_together %>%
+  mutate(Interim_Target_Year = as.numeric(Interim_Target_Year))
+
+# Helper to extract estimates (without SEs)
+extract_estimates_only <- function(model, outcome_label, group_label) {
+  tidy(model) %>%
+    filter(str_detect(term, "Year\\.x::")) %>%
+    mutate(
+      event_time = str_replace(term, "Year\\.x::", "Year "),
+      row_label = paste(outcome_label, "-", group_label),
+      estimate = round(estimate, 2)
+    ) %>%
+    select(row_label, event_time, estimate)
+}
+
+# Convert iplot to grob
+iplot_to_grob <- function(model, main_title) {
+  temp <- tempfile(fileext = ".png")
+  png(temp, width = 600, height = 500)
+  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Effect")
+  dev.off()
+  img <- png::readPNG(temp)
+  rasterGrob(img, interpolate = TRUE)
+}
+
+# Outcomes
+outcomes <- list(
+  Media_Articles_Total = "Total Media",
+  Percent_Negative_Business = "Negative Business",
+  Percent_Negative_Personal = "Negative Personal"
+)
+
+iplot_grobs <- list()
+estimates_list <- list()
+
+# Loop through outcomes and run models for both Interim Target groups
+for (outcome_var in names(outcomes)) {
+  label <- outcomes[[outcome_var]]
+
+  # Group 1: Interim Target > 2000
+  subset_with_target <- pulled_together %>%
+    filter((Treated == 1 & Interim_Target_Year > 2000) | Treated == 0)
+
+  model_with_target <- feols(as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x")),
+                             data = subset_with_target)
+  iplot_grobs[[paste(label, "Interim Target")]] <- iplot_to_grob(model_with_target, paste(label, "Interim Target"))
+  estimates_list[[paste(label, "Interim Target")]] <- extract_estimates_only(model_with_target, label, "Interim Target")
+
+  # Group 2: Interim Target < 2000
+  subset_no_target <- pulled_together %>%
+    filter((Treated == 1 & Interim_Target_Year < 2000) | Treated == 0)
+
+  model_no_target <- feols(as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x")),
+                           data = subset_no_target)
+  iplot_grobs[[paste(label, "No Interim Target")]] <- iplot_to_grob(model_no_target, paste(label, "No Interim Target"))
+  estimates_list[[paste(label, "No Interim Target")]] <- extract_estimates_only(model_no_target, label, "No Interim Target")
+}
+
+# Plot all 6 in a grid (2 rows × 3 columns)
+grid.arrange(
+  grobs = iplot_grobs,
+  ncol = 3,
+  top = textGrob("Figure 8: Staggered DiD – Interim Target Year Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold"))
+)
+
+# Table: Combine all estimates
+combined_table <- bind_rows(estimates_list) %>%
+  pivot_wider(names_from = event_time, values_from = estimate)
+
+# Display table
+gt(combined_table) %>%
+  tab_header(title = "Table 8. Staggered DiD Estimates by Interim Target Group (Estimates Only)") %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+```
+## Net Zero Year Heterogeneity – Staggered DiD on Media Outcomes
+```{r net-zero-year-heterogeneity-media, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+# Ensure Net_Zero_Year is numeric
+pulled_together <- pulled_together %>%
+  mutate(Net_Zero_Year = as.numeric(Net_Zero_Year))
+
+# Helper function to run DiD and plot
+run_nz_did_plot <- function(data, outcome_var, label, group_desc) {
+  fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+  model <- feols(fml, data = data)
+  
+  iplot(
+    model,
+    main = paste("Staggered DiD:", label, "- Net Zero Year", group_desc),
+    xlab = "Years Since Pledge",
+    ylab = paste("Effect on", label)
+  )
+}
+
+# Define outcomes and labels
+outcomes <- list(
+  Media_Articles_Total = "Total Media Articles",
+  Percent_Negative_Business = "% Negative Business Articles",
+  Percent_Negative_Personal = "% Negative Personal Articles"
+)
+
+# Loop through outcomes and Net Zero Year groups
+for (outcome_var in names(outcomes)) {
+  label <- outcomes[[outcome_var]]
+  
+  # Group: Net_Zero_Year ≤ 2035 or untreated
+  subset_nz_before_2035 <- pulled_together %>%
+    filter((Treated == 1 & Net_Zero_Year <= 2035) | Treated == 0)
+  
+  run_nz_did_plot(subset_nz_before_2035, outcome_var, label, "≤ 2035")
+  
+  # Group: Net_Zero_Year > 2035 or untreated
+  subset_nz_after_2035 <- pulled_together %>%
+    filter((Treated == 1 & Net_Zero_Year > 2035) | Treated == 0)
+  
+  run_nz_did_plot(subset_nz_after_2035, outcome_var, label, "> 2035")
+}
+
+```
+## 5. Accountability Heterogeneity – Staggered DiD by Media Outcomes
+
+
+```{r accountability-heterogeneity, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+library(fixest)
+library(dplyr)
+library(gt)
+library(stringr)
+library(grid)
+library(gridExtra)
+library(png)
+
+# Helper function to extract point estimates only
+extract_estimates_only <- function(model, outcome_label, group_label) {
+  tidy(model) %>%
+    filter(str_detect(term, "Year\\.x::")) %>%
+    mutate(
+      event_time = str_replace(term, "Year\\.x::", "Year "),
+      row_label = paste(outcome_label, "-", group_label),
+      estimate = round(estimate, 2)
+    ) %>%
+    select(row_label, event_time, estimate)
+}
+
+# Helper to convert iplot into a grob
+iplot_to_grob <- function(model, main_title) {
+  temp <- tempfile(fileext = ".png")
+  png(temp, width = 600, height = 500)
+  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Effect")
+  dev.off()
+  img <- png::readPNG(temp)
+  rasterGrob(img, interpolate = TRUE)
+}
+
+# Define groups and outcomes
+accountability_groups <- c("Not Specified", "Yes", "No")
+outcomes <- list(
+  Media_Articles_Total = "Total Media",
+  Percent_Negative_Business = "Negative Business %",
+  Percent_Negative_Personal = "Negative Personal %"
+)
+
+# Run models, create grobs and store estimates
+iplot_grobs <- list()
+estimates_list <- list()
+
+for (outcome_var in names(outcomes)) {
+  for (group in accountability_groups) {
+    label <- paste(outcomes[[outcome_var]], "-", group)
+    
+    subset_data <- pulled_together %>%
+      filter((Treated == 1 & Accountability_delivery == group) | Treated == 0)
+    
+    fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
+    model <- feols(fml, data = subset_data)
+    
+    iplot_grobs[[label]] <- iplot_to_grob(model, label)
+    estimates_list[[label]] <- extract_estimates_only(model, outcomes[[outcome_var]], group)
+  }
+}
+
+# Combine and format table
+combined_table <- bind_rows(estimates_list) %>%
+  pivot_wider(names_from = event_time, values_from = estimate)
+
+# Display GT Table
+gt(combined_table) %>%
+  tab_header(title = "Table 10. Staggered DiD Estimates by Accountability Group (Estimates Only)") %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+# Display 9 plots in 3x3 grid
+grid.arrange(
+  grobs = iplot_grobs,
+  ncol = 3,
+  top = textGrob("Figure 10: Staggered DiD by Accountability Delivery", gp = gpar(fontsize = 14, fontface = "bold"))
+)
+
+```
