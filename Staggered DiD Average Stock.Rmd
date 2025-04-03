@@ -135,130 +135,90 @@ iplot(
 
 ## 6. Carbon Credits Heterogeniety
 
-```{r carbon-credit-heterogeneity, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+```{r carbon-credit-heterogeneity-panelplot, fig.width=10, fig.height=4, warning=FALSE, message=FALSE}
+library(fixest)
+library(dplyr)
+library(broom)
+library(ggplot2)
+library(gridExtra)
 
-subset_data <- merged_data2 %>%
-  filter((Treated == 1 & Carbon_Credits == "Not Specified") | Treated == 0)
-
-staggered_model <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_data
-)
-
-iplot(
-  staggered_model,
-  main = "Staggered DiD: Not Specified Carbon Credits - Effect on Avg. Stock Price",
-  xlab = "Years Since Pledge",
-  ylab = "Estimated Effect on Stock Price"
-)
-
-# Filter: Treated firms with Carbon Credits == "Yes" OR all untreated firms
-subset_yes <- merged_data2 %>%
-  filter((Treated == 1 & Carbon_Credits == "Yes") | Treated == 0)
-
-# Run Staggered DiD regression
-staggered_model_yes <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_yes
-)
-
-# Visualize results
-iplot(
-  staggered_model_yes,
-  main = "Staggered DiD: Carbon Credits = Yes",
-  xlab = "Years Since Pledge",
-  ylab = "Estimated Effect on Stock Price"
-)
-
-# Filter: Treated firms with Carbon Credits == "No" OR all untreated firms
-subset_no <- merged_data2 %>%
-  filter((Treated == 1 & Carbon_Credits == "No") | Treated == 0)
-
-# Run Staggered DiD regression
-staggered_model_no <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_no
-)
-
-# Visualize results
-iplot(
-  staggered_model_no,
-  main = "Staggered DiD: Carbon Credits = No",
-  xlab = "Years Since Pledge",
-  ylab = "Estimated Effect on Stock Price"
-)
-
-### One Plot: 
-
-# Helper function to convert iplot to grob
-iplot_to_grob <- function(model, main_title) {
-  grid.newpage()
-  temp <- tempfile(fileext = ".png")
-  png(temp, width = 800, height = 600)  # Adjust resolution as needed
-  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Effect on Avg. Stock Price")
-  dev.off()
-  img <- png::readPNG(temp)
-  rasterGrob(img, interpolate = TRUE)
+# Function to extract DiD estimates
+extract_event_study <- function(model, group_label, color) {
+  tidy(model) %>%
+    filter(grepl("Year.x::", term)) %>%
+    mutate(
+      event_time = as.integer(gsub("Year.x::", "", term)),
+      group = group_label,
+      color = color
+    ) %>%
+    filter(!event_time %in% c(-6, -5, 4))  # Drop specified years
 }
 
-# Subset and run models
-subset_unspecified <- merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "Not Specified") | Treated == 0)
-model_unspecified <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, data = subset_unspecified)
+# Colors
+colors <- c("Not Specified" = "#999999", "Yes" = "#fc8d62", "No" = "#66c2a5")
 
-subset_yes <- merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "Yes") | Treated == 0)
-model_yes <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, data = subset_yes)
+# --- Run models ---
+model_unspecified <- feols(
+  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
+  data = merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "Not Specified") | Treated == 0)
+)
 
-subset_no <- merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "No") | Treated == 0)
-model_no <- feols(Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, data = subset_no)
+model_yes <- feols(
+  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
+  data = merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "Yes") | Treated == 0)
+)
 
-# Convert to grobs
-grob_unspecified <- iplot_to_grob(model_unspecified, "Not Specified")
-grob_yes <- iplot_to_grob(model_yes, "Yes")
-grob_no <- iplot_to_grob(model_no, "No")
+model_no <- feols(
+  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
+  data = merged_data2 %>% filter((Treated == 1 & Carbon_Credits == "No") | Treated == 0)
+)
 
-# Combine grobs in a list
-plot_list <- list(grob_unspecified, grob_yes, grob_no)
+# --- Extract results ---
+df_unspecified <- extract_event_study(model_unspecified, "Not Specified", colors["Not Specified"])
+df_yes         <- extract_event_study(model_yes,         "Yes",           colors["Yes"])
+df_no          <- extract_event_study(model_no,          "No",            colors["No"])
 
-# Arrange plots side-by-side with smaller title
+# Combine all
+all_data <- bind_rows(df_unspecified, df_yes, df_no)
+
+# --- Create plot function (No vertical line) ---
+plot_group <- function(data, group_label) {
+  ggplot(data %>% filter(group == group_label), aes(x = event_time, y = estimate)) +
+    geom_point(color = colors[group_label], size = 2) +
+    geom_errorbar(aes(ymin = estimate - 1.96 * std.error,
+                      ymax = estimate + 1.96 * std.error),
+                  width = 0.2, color = colors[group_label]) +
+    geom_hline(yintercept = 0, color = "black") +
+    labs(title = paste("Carbon Credits =", group_label),
+         x = "Years Since Pledge",
+         y = "Estimated Effect on Stock Price") +
+    theme_minimal(base_size = 11) +
+    ylim(min(all_data$estimate - 1.96 * all_data$std.error),
+         max(all_data$estimate + 1.96 * all_data$std.error))
+}
+
+
+# Generate individual plots
+plot1 <- plot_group(all_data, "Not Specified")
+plot2 <- plot_group(all_data, "Yes")
+plot3 <- plot_group(all_data, "No")
+
+# Combine all in one figure
+grid.arrange(plot1, plot2, plot3, ncol = 3,
+             top = textGrob("Figure 2: Stock Price Response by Carbon Credit Group",
+                            gp = gpar(fontsize = 14, fontface = "bold")))
+
+# Save figure as PNG
+png("carbon_credit_heterogeneity.png", width = 1200, height = 500)  # Adjust width/height as needed
+
 grid.arrange(
-  grobs = plot_list,
+  plot1, plot2, plot3,  # Replace these with your actual ggplot objects
   ncol = 3,
   top = textGrob("Figure 2: Carbon Credit Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold")),
   padding = unit(0.5, "line")
 )
-###Tabling
 
-# Helper to extract DiD terms
-extract_did <- function(model, label) {
-  tidy(model) %>%
-    filter(grepl("Year.x::", term)) %>%
-    mutate(
-      event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
-      estimate = round(estimate, 2),
-      std.error = round(std.error, 2)
-    ) %>%
-    select(event_time, estimate, std.error) %>%
-    pivot_longer(cols = c(estimate, std.error), names_to = "type", values_to = "value") %>%
-    mutate(row_label = ifelse(type == "estimate", label, paste(label, "SE"))) %>%
-    select(row_label, event_time, value)
-}
-
-# Extract results for each group
-not_specified_table <- extract_did(model_unspecified, "Not Specified")
-yes_table <- extract_did(model_yes, "Yes")
-no_table <- extract_did(model_no, "No")
-
-# Combine all and reshape
-combined_table <- bind_rows(not_specified_table, yes_table, no_table) %>%
-  pivot_wider(names_from = event_time, values_from = value)
-
-# Create final table
-gt(combined_table) %>%
-  tab_header(title = "Table 2. Carbon Credit Heterogeneity (Staggered DiD Estimates)") %>%
-  tab_style(
-    style = cell_text(weight = "bold"),
-    locations = cells_column_labels(everything())
-  )
+dev.off()
 
 ```
 
