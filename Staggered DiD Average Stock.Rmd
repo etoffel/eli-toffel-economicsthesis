@@ -83,37 +83,55 @@ merged_data2 <- merged_data2 %>%
     Year.y = ifelse(Treated == 0, NA, Year.y)
   )
 ```
+View(merged_data2)
 
 ## 4. Run Staggered DiD Model
 
 ```{r Staggered DiD}
+
+# Estimate model
 staggered_model <- feols(
   Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
   data = merged_data2
 )
-View(merged_data2)
 
+# View results
 summary(staggered_model)
 
-# 1. Extract and clean terms using your model's actual structure
+# 1. Extract and clean yearly terms
 tidy_yearx <- tidy(staggered_model) %>%
   filter(grepl("Year.x::", term)) %>%
   mutate(
-    event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
-    estimate = sprintf("%.2f", estimate),
-    std.error = sprintf("(%.2f)", std.error)
+    event_time = as.numeric(gsub("Year.x::", "", term)),
+    year_label = paste0("Year ", event_time),
+    estimate = round(estimate, 2),
+    std.error = round(std.error, 2)
   )
 
-# 2. Reshape to wide format for horizontal display
-horizontal_table <- tidy_yearx %>%
-  select(event_time, estimate, std.error) %>%
-  pivot_longer(cols = c("estimate", "std.error"), names_to = "stat", values_to = "value") %>%
-  pivot_wider(names_from = event_time, values_from = value)
+# 2. Weighted average DiD estimate (for post-treatment years only)
+att_avg <- tidy_yearx %>%
+  filter(event_time >= 0) %>%
+  summarize(
+    weighted_avg_ATT = round(weighted.mean(estimate, w = 1 / (std.error^2)), 2)
+  )
 
-# 3. Display as a nicely formatted gt table
+# 3. Prepare wide-format table
+horizontal_table <- tidy_yearx %>%
+  mutate(
+    estimate_str = sprintf("%.2f", estimate),
+    std_error_str = sprintf("(%.2f)", std.error)
+  ) %>%
+  select(year_label, estimate_str, std_error_str) %>%
+  pivot_longer(cols = c("estimate_str", "std_error_str"), names_to = "stat", values_to = "value") %>%
+  mutate(label = ifelse(stat == "estimate_str", "Estimate", "SE")) %>%
+  select(label, year_label, value) %>%
+  pivot_wider(names_from = year_label, values_from = value)
+
+# 4. Display table
 gt(horizontal_table) %>%
   tab_header(
-    title = "Table 1. Effect of Carbon Neutrality Pledges on Stock Price (Staggered DiD)"
+    title = md("**Table 1. Staggered DiD: Carbon Neutrality Pledges on Stock Price**"),
+    subtitle = paste("Weighted Avg Post-Treatment ATT:", att_avg$weighted_avg_ATT)
   ) %>%
   tab_style(
     style = cell_text(weight = "bold"),
@@ -124,23 +142,25 @@ gt(horizontal_table) %>%
 
 ## 5. Visualize Staggered DiD Results
 
-```{r plot-staggered-did}
+```{r plot-staggered-did-trimmed}
+# Get range of event times from the model
+event_times <- as.numeric(gsub("Year.x::", "", names(coef(staggered_model))))
+# Filter to include only from min to 4 (exclude Year 5 & 6)
+included_years <- event_times[event_times <= 4]
+
 iplot(
   staggered_model,
   main = "Figure 1: Staggered DiD: Effect on Avg. Stock Price",
   xlab = "Years Since Pledge",
-  ylab = "Estimated Effect on Stock Price"
+  ylab = "Estimated Effect on Stock Price",
+  xlim = range(included_years)  # trim to Year -X to 4
 )
+
 ```
 
 ## 6. Carbon Credits Heterogeniety
 
 ```{r carbon-credit-heterogeneity-panelplot, fig.width=10, fig.height=4, warning=FALSE, message=FALSE}
-library(fixest)
-library(dplyr)
-library(broom)
-library(ggplot2)
-library(gridExtra)
 
 # Function to extract DiD estimates
 extract_event_study <- function(model, group_label, color) {
@@ -207,136 +227,116 @@ plot3 <- plot_group(all_data, "No")
 grid.arrange(plot1, plot2, plot3, ncol = 3,
              top = textGrob("Figure 2: Stock Price Response by Carbon Credit Group",
                             gp = gpar(fontsize = 14, fontface = "bold")))
-
-# Save figure as PNG
-png("carbon_credit_heterogeneity.png", width = 1200, height = 500)  # Adjust width/height as needed
-
-grid.arrange(
-  plot1, plot2, plot3,  # Replace these with your actual ggplot objects
-  ncol = 3,
-  top = textGrob("Figure 2: Carbon Credit Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold")),
-  padding = unit(0.5, "line")
-)
-
-dev.off()
-
 ```
 
 ## Interm Target
-```{r Interm-heterogeneity, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+```{r Interm-heterogeneity, fig.width=10, fig.height=5, warning=FALSE, message=FALSE}
 
-# Convert Interim_Target_Year to numeric if it's not already
+# Ensure Interim_Target_Year is numeric
 merged_data2 <- merged_data2 %>%
   mutate(Interim_Target_Year = as.numeric(Interim_Target_Year))
 
-# --- Subset: Treated firms with interim target > 2000 OR untreated firms
-subset_interim_target <- merged_data2 %>%
-  filter((Treated == 1 & Interim_Target_Year > 2000) | Treated == 0)
-
-# Run Staggered DiD model
-staggered_model_interim <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_interim_target
-)
-
-# Plot results
-iplot(
-  staggered_model_interim,
-  main = "Staggered DiD: Interim Target vs Control",
-  xlab = "Years Since Pledge",
-  ylab = "Effect on Stock Price"
-)
-
-# Filter: Treated firms with Interim_Target_Year < 2000 OR all untreated firms
-subset_interim_before_2000 <- merged_data2 %>%
-  filter((Treated == 1 & Interim_Target_Year < 2000) | Treated == 0)
-
-# Run the Staggered DiD regression
-staggered_model_interim_before_2000 <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_interim_before_2000
-)
-
-# Plot results
-iplot(
-  staggered_model_interim_before_2000,
-  main = "Staggered DiD: NO Interim Target vs Control",
-  xlab = "Years Since Pledge",
-  ylab = "Effect on Stock Price"
-)
-
-##Plotting Together and Tabling
-
-# Make sure Interim_Target_Year is numeric
-merged_data2 <- merged_data2 %>%
-  mutate(Interim_Target_Year = as.numeric(Interim_Target_Year))
-
-# Subset: Interim Target AFTER 2000 or untreated
+# Subset: Interim Target > 2000 or untreated
 subset_after_2000 <- merged_data2 %>%
   filter((Treated == 1 & Interim_Target_Year > 2000) | Treated == 0)
 
+# Subset: Interim Target < 2000 or untreated
+subset_before_2000 <- merged_data2 %>%
+  filter((Treated == 1 & Interim_Target_Year < 2000) | Treated == 0)
+
+# Run models
 model_after_2000 <- feols(
   Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
   data = subset_after_2000
 )
-
-# Subset: Interim Target BEFORE 2000 or untreated
-subset_before_2000 <- merged_data2 %>%
-  filter((Treated == 1 & Interim_Target_Year < 2000) | Treated == 0)
 
 model_before_2000 <- feols(
   Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
   data = subset_before_2000
 )
 
-# ---- Plotting (Wrap base plots into grobs) ----
-iplot_to_grob <- function(model, title) {
+# ---- Shared y-axis range ----
+all_ci_vals <- c(confint(model_after_2000)[, 1:2], confint(model_before_2000)[, 1:2])
+y_range <- range(all_ci_vals)
+
+# ---- Helper to plot with style ----
+iplot_to_grob <- function(model, main_title, col = "black", col.border = "black", ylim_range = NULL) {
   temp <- tempfile(fileext = ".png")
-  png(temp)
-  iplot(model, main = title, xlab = "Years Since Pledge", ylab = "Effect on Avg. Stock Price")
+  png(temp, width = 800, height = 600)
+
+  event_times <- as.numeric(gsub("Year.x::", "", names(coef(model))))
+  xlim_range <- range(event_times[!event_times %in% c(-6, 5, 6)])
+
+  iplot(model,
+        main = main_title,
+        xlab = "Years Since Pledge",
+        ylab = "Estimated Effect on Stock Price",
+        col = col,
+        col.border = col.border,
+        ref.line = FALSE,
+        xlim = xlim_range,
+        ylim = ylim_range,
+        cex = 2.5,      # Bigger dots
+        lwd = 2.5)    # Thicker lines
+  
   dev.off()
-  rasterGrob(png::readPNG(temp), interpolate = TRUE)
+  img <- png::readPNG(temp)
+  grid::rasterGrob(img, interpolate = TRUE)
 }
 
-grob_after <- iplot_to_grob(model_after_2000, "With Interim Target")
-grob_before <- iplot_to_grob(model_before_2000, "No Interim Target")
 
-# Arrange both plots side by side
+
+# Colors
+sky_blue <- "#87CEEB"
+bubblegum_pink <- "#FF69B4"
+
+# Create styled plots
+grob_after <- iplot_to_grob(model_after_2000, "With Interim Target", sky_blue, sky_blue, y_range)
+grob_before <- iplot_to_grob(model_before_2000, "No Interim Target", bubblegum_pink, bubblegum_pink, y_range)
+
+# Arrange plots side by side
 grid.arrange(
   grob_after, grob_before,
   ncol = 2,
   top = textGrob("Figure: Interim Target Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold"))
 )
 
-# ---- Table Creation ----
-extract_did <- function(model, label) {
+# --- Helper: Extract and reshape DiD estimates ---
+extract_did_interim <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
     mutate(
-      event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
-      estimate = round(estimate, 2),
-      std.error = round(std.error, 2)
+      event_time = gsub("Year.x::", "Year ", term),
+      estimate = sprintf("%.2f", estimate),
+      std.error = sprintf("(%.2f)", std.error)
     ) %>%
     select(event_time, estimate, std.error) %>%
-    pivot_longer(cols = c(estimate, std.error), names_to = "type", values_to = "value") %>%
-    mutate(row_label = ifelse(type == "estimate", label, paste(label, "SE"))) %>%
+    pivot_longer(cols = c("estimate", std.error), names_to = "stat", values_to = "value") %>%
+    mutate(row_label = ifelse(stat == "estimate", label, paste(label, "SE"))) %>%
     select(row_label, event_time, value)
 }
 
-table_after <- extract_did(model_after_2000, "Interim Target")
-table_before <- extract_did(model_before_2000, "No Interim Target")
+# Extract results for both groups
+table_after_2000  <- extract_did_interim(model_after_2000, "Interim Target")
+table_before_2000 <- extract_did_interim(model_before_2000, "No Interim Target")
 
-combined_table <- bind_rows(table_after, table_before) %>%
+# Combine and reshape to wide format
+interim_combined_table <- bind_rows(table_after_2000, table_before_2000) %>%
   pivot_wider(names_from = event_time, values_from = value)
 
-gt(combined_table) %>%
-  tab_header(title = "Table 3: Interim Target Heterogeneity (Staggered DiD Estimates)") %>%
+# Display as gt table
+gt(interim_combined_table) %>%
+  tab_header(title = "Table: Stock Price Impact by Interim Target Year") %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_column_labels(everything())
   )
 
 ```
+
+
+
+
 ## Net Zero Complete-By
 ```{r final-year-heterogeneity, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
 
