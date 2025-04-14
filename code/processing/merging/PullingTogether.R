@@ -1,5 +1,6 @@
 source('housekeeping.R')
 
+### SUBSETTED DATA
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
 revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
@@ -15,7 +16,8 @@ media_data <- media_data %>%
 media_data <- media_data %>%
   mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
 
-View(media_data)
+View(carbon_neutral)
+View(stock_data)
 
 # Merge by Unique ID and Year
 merged_data2 <- media_data %>%
@@ -93,5 +95,28 @@ merged_data3 <- merged_data2 %>%
     End_Target %in% c("No target") ~ "No Target",
     TRUE ~ "Other"
   ))
+
+View(merged_data3)
+
+### T-Mobile Fix
+# Define the column range to shift
+cols_to_shift <- 11:45
+
+# Identify T-Mobile rows
+rows_to_shift <- !is.na(merged_data3$Company.y) & merged_data3$Company.y == "T-Mobile"
+
+
+# Convert affected columns to character just for assignment safety
+merged_data3[cols_to_shift] <- lapply(merged_data3[cols_to_shift], as.character)
+
+# Create a shifted version of the relevant slice
+shift_matrix <- merged_data3[rows_to_shift, cols_to_shift]
+
+# Shift left: assign col 2:n to col 1:(n-1)
+shift_matrix[, -length(cols_to_shift)] <- shift_matrix[, -1]
+shift_matrix[, length(cols_to_shift)] <- NA  # Fill last col with NA
+
+# Assign the shifted matrix back
+merged_data3[rows_to_shift, cols_to_shift] <- shift_matrix
 
 write.csv(merged_data3, "data/clean/MediaDataPulledTogether.csv", row.names = FALSE)

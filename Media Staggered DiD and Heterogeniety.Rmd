@@ -20,6 +20,66 @@ pulled_together <- read_csv("data/clean/MediaDataPulledTogether.csv") %>%
   select(-Nexis_Input, -Parent_Company) %>%
   filter(!is.na(Media_Articles_Total), Years_to_Pledge <= 10, !is.na(Unique_ID)) %>%
   mutate(Year.y = ifelse(Year.y == 0, NA, Year.y))
+
+### Making Table for Counts
+
+# Custom ordering for End_Target
+target_order <- c(
+  "Net zero", 
+  "Carbon neutral(ity)", 
+  "Climate neutral", 
+  "Carbon negative", 
+  "Zero emissions", 
+  "Emissions reduction target", 
+  "No target"
+)
+
+# Set target groupings manually
+table_data <- tibble(
+  End_Target = c("Net zero", "Carbon neutral(ity)", "Emissions reduction target", 
+                 "No target", "Climate neutral", "Carbon negative", "Zero emissions"),
+  Count = c(52, 15, 13, 13, 2, 1, 1),
+  Group = c("Treatment", "Treatment", "Control", "Control", "Treatment", "Treatment", "Treatment")
+) %>%
+  mutate(
+    End_Target = factor(End_Target, levels = target_order)
+  ) %>%
+  arrange(End_Target)
+
+# Build the gt table
+table_data %>%
+  gt() %>%
+  cols_label(
+    End_Target = "End Target",
+    Count = "Count"
+  ) %>%
+  tab_header(
+    title = "Table 1: Carbon Commitment Targets",
+    subtitle = "Grouped and ordered by treatment/control classification"
+  ) %>%
+  fmt_number(
+    columns = c(Count),
+    decimals = 0
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#e0f7fa"),
+    locations = cells_body(
+      rows = Group == "Treatment"
+    )
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#f1f8e9"),
+    locations = cells_body(
+      rows = Group == "Control"
+    )
+  ) %>%
+  grand_summary_rows(
+    columns = c(Count),
+    fns = list(Total = ~sum(Count)),
+    formatter = fmt_number,
+    decimals = 0
+  )
+
 ```
 
 ## 2. Create Share of Negative Media Coverage
@@ -31,11 +91,6 @@ pulled_together <- pulled_together %>%
     Percent_Negative_Personal = ifelse(Media_Articles_Total > 0,
       pmin(Negative_Personal_Articles / Media_Articles_Total * 100, 100), NA)
   )
-```
-## 3. Staggered DiDs - Media Coverage
-```{r staggered-did-media, fig.width=10, fig.height=4.5, warning=FALSE, message=FALSE}
-
-
 ```
 
 ## 3. Staggered DiDs

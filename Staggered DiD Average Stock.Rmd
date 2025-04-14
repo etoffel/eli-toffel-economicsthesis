@@ -13,7 +13,7 @@ source("housekeeping.R")
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
 revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
-View()
+
 # Fix Unique ID for Burger King
 stock_data <- stock_data %>% mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
 revenue_data <- revenue_data %>% mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
@@ -83,10 +83,128 @@ merged_data2 <- merged_data2 %>%
     Year.y = ifelse(Treated == 0, NA, Year.y)
   )
 ```
+
+```{r Updated Count Table}
+
+# Define treatment and control classifications
+treatment_targets <- c("Net zero", "Carbon neutral(ity)", "Climate neutral", 
+                       "Carbon negative", "Zero emissions")
+control_targets <- c("Emissions reduction target", "No target")
+
+# Define custom order
+target_order <- c(
+  "Net zero", 
+  "Carbon neutral(ity)", 
+  "Climate neutral", 
+  "Carbon negative", 
+  "Zero emissions", 
+  "Emissions reduction target", 
+  "No target"
+)
+
+# Create the table from merged_data2
+table_data <- merged_data2 %>%
+  filter(Year.x == 2018) %>%
+  count(End_Target) %>%
+  mutate(
+    Group = case_when(
+      End_Target %in% treatment_targets ~ "Treatment",
+      End_Target %in% control_targets ~ "Control",
+      TRUE ~ "Other"
+    ),
+    End_Target = factor(End_Target, levels = target_order)
+  ) %>%
+  filter(!is.na(End_Target)) %>%
+  arrange(End_Target)
+
+# Build the gt table
+table_data %>%
+  gt() %>%
+  cols_label(
+    End_Target = "End Target",
+    n = "Count"
+  ) %>%
+  tab_header(
+    title = "Table 2: Public Companies' Carbon Targets",
+    subtitle = "Grouped and ordered by treatment/control classification"
+  ) %>%
+  fmt_number(
+    columns = c(n),
+    decimals = 0
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#e0f7fa"),
+    locations = cells_body(
+      rows = Group == "Treatment"
+    )
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#f1f8e9"),
+    locations = cells_body(
+      rows = Group == "Control"
+    )
+  ) %>%
+  grand_summary_rows(
+    columns = c(n),
+    fns = list(Total = ~sum(n)),
+    formatter = fmt_number,
+    decimals = 0
+  )
+
+```
+
+```{r Summary Stats}
+
+# Summary stats for treated firms in 2020
+treated_summary_2020 <- merged_data2 %>%
+  filter(Treated == 1, Year.x == 2020) %>%
+  mutate(
+    Carbon_Credits = case_when(
+      Carbon_Credits %in% c("Yes", "No") ~ Carbon_Credits,
+      is.na(Carbon_Credits) | Carbon_Credits == "" ~ "Not Specified",
+      TRUE ~ "Not Specified"
+    )
+  ) %>%
+  group_by(Carbon_Credits) %>%
+  summarise(
+    Count = n(),
+    `Avg Year.y` = round(mean(Year.y, na.rm = TRUE), 0),
+    `Avg Interim Target Year` = round(mean(Interim_Target_Year, na.rm = TRUE), 0),
+    `Avg Net Zero Year` = round(mean(Net_Zero_Year, na.rm = TRUE), 0),
+    .groups = "drop"
+  )
+
+# Display with gt
+treated_summary_2020 %>%
+  gt() %>%
+  tab_header(
+    title = "Treated Firms in 2020",
+    subtitle = "Carbon Credits and Target Years"
+  ) %>%
+  cols_label(
+    Carbon_Credits = "Carbon Credits",
+    Count = "Firms",
+    `Avg Year.y` = "Avg Pledge Year",
+    `Avg Interim Target Year` = "Avg Interim Year",
+    `Avg Net Zero Year` = "Avg Net Zero Year"
+  ) %>%
+  fmt_number(
+    columns = c(`Avg Year.y`, `Avg Interim Target Year`, `Avg Net Zero Year`),
+    decimals = 0,
+    use_seps = FALSE  # Removes commas like 2,021
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+```
+
 View(merged_data2)
 
-## 4. Run Staggered DiD Model
 
+
+## 4. Run Staggered DiD Model
 ```{r Staggered DiD}
 
 # Estimate model
@@ -255,11 +373,11 @@ model_before_2000 <- feols(
   data = subset_before_2000
 )
 
-# ---- Shared y-axis range ----
+# Shared y-axis range
 all_ci_vals <- c(confint(model_after_2000)[, 1:2], confint(model_before_2000)[, 1:2])
 y_range <- range(all_ci_vals)
 
-# ---- Helper to plot with style ----
+# Helper function to make iplot grobs with internal title
 iplot_to_grob <- function(model, main_title, col = "black", col.border = "black", ylim_range = NULL) {
   temp <- tempfile(fileext = ".png")
   png(temp, width = 800, height = 600)
@@ -276,35 +394,50 @@ iplot_to_grob <- function(model, main_title, col = "black", col.border = "black"
         ref.line = FALSE,
         xlim = xlim_range,
         ylim = ylim_range,
-        cex = 2.5,      # Bigger dots
-        lwd = 2.5)    # Thicker lines
-  
+        cex = 2.5,
+        lwd = 2.5,
+        cex.main = 2.2,
+        cex.lab = 1.4,
+        cex.axis = 1.2
+  )
+
   dev.off()
   img <- png::readPNG(temp)
   grid::rasterGrob(img, interpolate = TRUE)
 }
 
-
-
-# Colors
+# Plot colors
 sky_blue <- "#87CEEB"
 bubblegum_pink <- "#FF69B4"
 
-# Create styled plots
-grob_after <- iplot_to_grob(model_after_2000, "With Interim Target", sky_blue, sky_blue, y_range)
+# Create styled plots with titles embedded
+grob_after  <- iplot_to_grob(model_after_2000, "With Interim Target", sky_blue, sky_blue, y_range)
 grob_before <- iplot_to_grob(model_before_2000, "No Interim Target", bubblegum_pink, bubblegum_pink, y_range)
 
-# Arrange plots side by side
-grid.arrange(
-  grob_after, grob_before,
-  ncol = 2,
-  top = textGrob("Figure: Interim Target Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold"))
+# ----- Tightly stacked layout -----
+library(grid)
+library(gridExtra)
+
+main_title <- textGrob("Figure 3: Interim Target Heterogeneity", gp = gpar(fontsize = 18, fontface = "bold"))
+plots_row  <- arrangeGrob(grob_after, grob_before, ncol = 2)
+
+# Stack title + plots with tighter spacing
+final_layout <- arrangeGrob(
+  main_title,
+  plots_row,
+  ncol = 1,
+  heights = unit(c(0.8, 10), "null")  # control spacing here
 )
+
+# Render layout
+grid.newpage()
+grid.draw(final_layout)
 
 # --- Helper: Extract and reshape DiD estimates ---
 extract_did_interim <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
+    filter(!term %in% c("Year.x::-6", "Year.x::5", "Year.x::6")) %>%
     mutate(
       event_time = gsub("Year.x::", "Year ", term),
       estimate = sprintf("%.2f", estimate),
@@ -316,17 +449,16 @@ extract_did_interim <- function(model, label) {
     select(row_label, event_time, value)
 }
 
-# Extract results for both groups
+# Extract table data
 table_after_2000  <- extract_did_interim(model_after_2000, "Interim Target")
 table_before_2000 <- extract_did_interim(model_before_2000, "No Interim Target")
 
-# Combine and reshape to wide format
+# Combine and display
 interim_combined_table <- bind_rows(table_after_2000, table_before_2000) %>%
   pivot_wider(names_from = event_time, values_from = value)
 
-# Display as gt table
 gt(interim_combined_table) %>%
-  tab_header(title = "Table: Stock Price Impact by Interim Target Year") %>%
+  tab_header(title = "Table 3: Stock Price Impact by Interim Target Year") %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_column_labels(everything())
@@ -338,100 +470,117 @@ gt(interim_combined_table) %>%
 
 
 ## Net Zero Complete-By
-```{r final-year-heterogeneity, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+```{r final-year-heterogeneity, fig.width=10, fig.height=5, warning=FALSE, message=FALSE}
 
 # Ensure Net_Zero_Year is numeric
 merged_data2 <- merged_data2 %>%
   mutate(Net_Zero_Year = as.numeric(Net_Zero_Year))
 
-# Filter: Treated firms with Net_Zero_Year <= 2035 OR all untreated firms
-subset_netzero_before_2035 <- merged_data2 %>%
+# Subset for Net Zero Year ≤ 2035
+subset_nz_before <- merged_data2 %>%
   filter((Treated == 1 & Net_Zero_Year <= 2035) | Treated == 0)
 
-# Run the Staggered DiD regression
-staggered_model_nz_before_2035 <- feols(
-  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_netzero_before_2035
-)
-
-# Plot results
-iplot(
-  staggered_model_nz_before_2035,
-  main = "Staggered DiD: Net Zero Year ≤ 2035 vs Control",
-  xlab = "Years Since Pledge",
-  ylab = "Effect on Stock Price"
-)
-
-# Filter: Treated firms with Net_Zero_Year > 2035 OR all untreated firms
-subset_netzero_after_2035 <- merged_data2 %>%
+# Subset for Net Zero Year > 2035
+subset_nz_after <- merged_data2 %>%
   filter((Treated == 1 & Net_Zero_Year > 2035) | Treated == 0)
 
-# Run the Staggered DiD regression
-staggered_model_nz_after_2035 <- feols(
+# Run models
+model_nz_before <- feols(
   Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-  data = subset_netzero_after_2035
+  data = subset_nz_before
 )
 
-# Plot results
-iplot(
-  staggered_model_nz_after_2035,
-  main = "Staggered DiD: Net Zero Year > 2035 vs Control",
-  xlab = "Years Since Pledge",
-  ylab = "Effect on Stock Price"
+model_nz_after <- feols(
+  Avg_Stock_Price ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
+  data = subset_nz_after
 )
 
-### Plotting Side by Side
-# Helper: Wrap iplot into grob for grid.arrange
-iplot_to_grob <- function(model, main_title) {
-  grid.newpage()
+# Shared y-axis range
+all_ci_vals <- c(confint(model_nz_before)[, 1:2], confint(model_nz_after)[, 1:2])
+y_range <- range(all_ci_vals)
+
+# Updated iplot_to_grob function
+iplot_to_grob <- function(model, main_title, col = "black", col.border = "black", ylim_range = NULL) {
   temp <- tempfile(fileext = ".png")
-  png(temp)
-  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Effect on Avg. Stock Price")
+  png(temp, width = 800, height = 600)
+
+  event_times <- as.numeric(gsub("Year.x::", "", names(coef(model))))
+  xlim_range <- range(event_times[!event_times %in% c(-6, -5, 5, 6)])
+
+  iplot(model,
+        main = main_title,
+        xlab = "Years Since Pledge",
+        ylab = "Estimated Effect on Stock Price",
+        col = col,
+        col.border = col.border,
+        ref.line = FALSE,
+        xlim = xlim_range,
+        ylim = ylim_range,
+        cex = 2.5,
+        lwd = 2.5,
+        cex.main = 2.2,
+        cex.lab = 1.4,
+        cex.axis = 1.2
+  )
+
   dev.off()
   img <- png::readPNG(temp)
-  rasterGrob(img, interpolate = TRUE)
+  grid::rasterGrob(img, interpolate = TRUE)
 }
 
-# Create grobs
-grob_nz_before <- iplot_to_grob(staggered_model_nz_before_2035, "Net Zero Year ≤ 2035")
-grob_nz_after  <- iplot_to_grob(staggered_model_nz_after_2035,  "Net Zero Year > 2035")
+# Pick two new colors
+deep_orange <- "#FF7F50"
+rich_purple <- "#9370DB"
 
-# Plot side-by-side
-gridExtra::grid.arrange(
-  grob_nz_before, grob_nz_after,
-  ncol = 2,
-  top = grid::textGrob("Figure: Net Zero Target Year Heterogeneity", gp = gpar(fontsize = 14, fontface = "bold"))
+# Create grobs
+grob_nz_before <- iplot_to_grob(model_nz_before, "Net Zero Year ≤ 2035", col = deep_orange, col.border = deep_orange, ylim_range = y_range)
+grob_nz_after  <- iplot_to_grob(model_nz_after,  "Net Zero Year > 2035", col = rich_purple, col.border = rich_purple, ylim_range = y_range)
+
+# Layout title + plots with minimal spacing
+library(grid)
+library(gridExtra)
+
+main_title <- textGrob("Figure 4: Net Zero Target Year Heterogeneity", gp = gpar(fontsize = 18, fontface = "bold"))
+plots_row  <- arrangeGrob(grob_nz_before, grob_nz_after, ncol = 2)
+
+final_layout <- arrangeGrob(
+  main_title,
+  plots_row,
+  ncol = 1,
+  heights = unit(c(0.8, 10), "null")  # Reduce spacing above plots
 )
-##Tabling
-# Helper to extract and format
+
+grid.newpage()
+grid.draw(final_layout)
+
+# --- Table ---
 extract_did <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
+    filter(!term %in% c("Year.x::-6", "Year.x::-5", "Year.x::5", "Year.x::6")) %>%
     mutate(
       event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
       estimate = sprintf("%.2f", estimate),
-      std.error = sprintf("%.2f", std.error)
+      std.error = sprintf("(%.2f)", std.error)
     ) %>%
     select(event_time, estimate, std.error) %>%
-    pivot_longer(cols = c("estimate", "std.error"), names_to = "stat", values_to = "value") %>%
+    pivot_longer(cols = c("estimate", std.error), names_to = "stat", values_to = "value") %>%
     mutate(row_label = ifelse(stat == "estimate", label, paste(label, "SE"))) %>%
     select(row_label, event_time, value)
 }
 
 # Extract
-table_nz_before <- extract_did(staggered_model_nz_before_2035, "Net Zero ≤ 2035")
-table_nz_after  <- extract_did(staggered_model_nz_after_2035,  "Net Zero > 2035")
+table_nz_before <- extract_did(model_nz_before, "Net Zero ≤ 2035")
+table_nz_after  <- extract_did(model_nz_after,  "Net Zero > 2035")
 
-# Combine and reshape
+# Combine and display
 combined_table <- bind_rows(table_nz_before, table_nz_after) %>%
   pivot_wider(names_from = event_time, values_from = value)
 
-# Display
 gt(combined_table) %>%
   tab_header(title = "Table 4: Net Zero Target Year Heterogeneity (Staggered DiD Estimates)") %>%
   tab_style(style = cell_text(weight = "bold"),
             locations = cells_column_labels(everything()))
-
 ```
 
 ## Accountability Heterogeniety
