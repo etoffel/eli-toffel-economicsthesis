@@ -71,6 +71,26 @@ merged_data2 <- merged_data2 %>%
            Unique_ID == 60 & Company.x == "Netflix" ~ "Net zero",
            TRUE ~ End_Target
          ))
+
+### T-Mobile Fix
+# Define the column range to shift
+cols_to_shift <- 12:46
+
+# Identify T-Mobile rows
+rows_to_shift <- !is.na(merged_data2$Company.y) & merged_data2$Company.y == "T-Mobile"
+
+# Convert affected columns to character just for assignment safety
+merged_data2[cols_to_shift] <- lapply(merged_data2[cols_to_shift], as.character)
+
+# Create a shifted version of the relevant slice
+shift_matrix <- merged_data2[rows_to_shift, cols_to_shift]
+
+# Shift left: assign col 2:n to col 1:(n-1)
+shift_matrix[, -length(cols_to_shift)] <- shift_matrix[, -1]
+shift_matrix[, length(cols_to_shift)] <- NA  # Fill last col with NA
+
+# Assign the shifted matrix back
+merged_data2[rows_to_shift, cols_to_shift] <- shift_matrix
 ```
 
 ## 3. Set Treatment and Placebo Variables
@@ -85,13 +105,19 @@ merged_data2 <- merged_data2 %>%
 ```
 
 ```{r Updated Count Table}
+# Step 1: Select one row per firm (e.g., first year available)
+single_obs <- merged_data2 %>%
+  arrange(Unique_ID, Year.x) %>%
+  group_by(Unique_ID) %>%
+  slice(1) %>%
+  ungroup()
 
-# Define treatment and control classifications
+View(single_obs)
+
+# Step 2: Define treatment/control target types
 treatment_targets <- c("Net zero", "Carbon neutral(ity)", "Climate neutral", 
                        "Carbon negative", "Zero emissions")
 control_targets <- c("Emissions reduction target", "No target")
-
-# Define custom order
 target_order <- c(
   "Net zero", 
   "Carbon neutral(ity)", 
@@ -102,9 +128,8 @@ target_order <- c(
   "No target"
 )
 
-# Create the table from merged_data2
-table_data <- merged_data2 %>%
-  filter(Year.x == 2018) %>%
+# Step 3: Count and categorize targets from this one-row-per-firm dataset
+table_data <- single_obs %>%
   count(End_Target) %>%
   mutate(
     Group = case_when(
@@ -116,7 +141,6 @@ table_data <- merged_data2 %>%
   ) %>%
   filter(!is.na(End_Target)) %>%
   arrange(End_Target)
-
 # Build the gt table
 table_data %>%
   gt() %>%
@@ -155,48 +179,43 @@ table_data %>%
 
 ```{r Summary Stats}
 
-# Summary stats for treated firms in 2020
-treated_summary_2020 <- merged_data2 %>%
-  filter(Treated == 1, Year.x == 2020) %>%
-  mutate(
-    Carbon_Credits = case_when(
-      Carbon_Credits %in% c("Yes", "No") ~ Carbon_Credits,
-      is.na(Carbon_Credits) | Carbon_Credits == "" ~ "Not Specified",
-      TRUE ~ "Not Specified"
-    )
-  ) %>%
-  group_by(Carbon_Credits) %>%
-  summarise(
-    Count = n(),
-    `Avg Year.y` = round(mean(Year.y, na.rm = TRUE), 0),
-    `Avg Interim Target Year` = round(mean(Interim_Target_Year, na.rm = TRUE), 0),
-    `Avg Net Zero Year` = round(mean(Net_Zero_Year, na.rm = TRUE), 0),
-    .groups = "drop"
-  )
-
-# Display with gt
-treated_summary_2020 %>%
+treated_summary %>%
   gt() %>%
   tab_header(
-    title = "Treated Firms in 2020",
-    subtitle = "Carbon Credits and Target Years"
+    title = "Table 3: Treated Firms Summary Statistics",
+    subtitle = "Carbon Credits, Target Years, and Interim Years"
   ) %>%
   cols_label(
     Carbon_Credits = "Carbon Credits",
     Count = "Firms",
-    `Avg Year.y` = "Avg Pledge Year",
-    `Avg Interim Target Year` = "Avg Interim Year",
-    `Avg Net Zero Year` = "Avg Net Zero Year"
+    Has_Interim = "Has Interim Target?",
+    `Avg Pledge Year` = "Avg Pledge Year",
+    `Avg Net Zero Year` = "Avg Completion Date"
   ) %>%
+  cols_move(columns = Count, after = Carbon_Credits) %>%
+  cols_move(columns = Has_Interim, after = Count) %>%
   fmt_number(
-    columns = c(`Avg Year.y`, `Avg Interim Target Year`, `Avg Net Zero Year`),
+    columns = c(`Avg Pledge Year`, `Avg Net Zero Year`),
     decimals = 0,
-    use_seps = FALSE  # Removes commas like 2,021
+    use_seps = FALSE
   ) %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = colors["Not Specified"])),
+    locations = cells_body(rows = Carbon_Credits == "Not Specified")
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = colors["No"])),
+    locations = cells_body(rows = Carbon_Credits == "No")
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = colors["Yes"])),
+    locations = cells_body(rows = Carbon_Credits == "Yes")
   )
+
 
 ```
 
@@ -248,7 +267,7 @@ horizontal_table <- tidy_yearx %>%
 # 4. Display table
 gt(horizontal_table) %>%
   tab_header(
-    title = md("**Table 1. Staggered DiD: Carbon Neutrality Pledges on Stock Price**"),
+    title = md("**Table 4. Staggered DiD: Carbon Neutrality Pledges on Stock Price**"),
     subtitle = paste("Weighted Avg Post-Treatment ATT:", att_avg$weighted_avg_ATT)
   ) %>%
   tab_style(
@@ -345,10 +364,85 @@ plot3 <- plot_group(all_data, "No")
 grid.arrange(plot1, plot2, plot3, ncol = 3,
              top = textGrob("Figure 2: Stock Price Response by Carbon Credit Group",
                             gp = gpar(fontsize = 14, fontface = "bold")))
+
+# Filter to post-treatment years only (event_time >= 0)
+carbon_table <- all_data %>%
+  filter(event_time >= 0) %>%
+  mutate(
+    Year = paste0("Year ", event_time),
+    Estimate = sprintf("%.2f", estimate),
+    SE = sprintf("(%.2f)", std.error)
+  ) %>%
+  select(Group = group, Year, Estimate, SE)
+
+# Display with gt
+gt(carbon_table) %>%
+  tab_header(
+    title = md("**Table 5. Stock Price Effects by Carbon Credit Group**"),
+    subtitle = "Post-Treatment Estimates Only (Years ≥ 0)"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+# Define lighter color mapping
+colors <- c(
+  "Not Specified" = "#d3d3d3",  # light gray
+  "Yes" = "#fddbc7",            # light orange
+  "No" = "#d1eeea"              # light turquoise
+)
+
+group_levels <- c("Not Specified", "Yes", "No")
+
+# Prepare data
+carbon_table <- all_data %>%
+  filter(event_time >= 0) %>%
+  mutate(
+    Group = factor(group, levels = group_levels),
+    Year = as.character(event_time),
+    Estimate = sprintf("%.2f", estimate),
+    SE = sprintf("(%.2f)", std.error)
+  ) %>%
+  select(Group, Year, Estimate, SE) %>%
+  arrange(Group, as.numeric(Year)) %>%
+  group_by(Group) %>%
+  mutate(Group = ifelse(row_number() == 1, as.character(Group), "")) %>%
+  ungroup()
+
+# Build gt table
+gt_table <- gt(carbon_table) %>%
+  tab_header(
+    title = md("**Table 5. Stock Price Effects by Carbon Credit Group**"),
+    subtitle = "Post-Treatment Estimates Only (Years ≥ 0)"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+# Apply lighter row background colors
+for (i in seq_len(nrow(carbon_table))) {
+  original_group <- as.character(all_data$group[which(all_data$event_time >= 0)][i])
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = colors[original_group]),
+      locations = cells_body(rows = i)
+    )
+}
+
+# Display final table
+gt_table
 ```
 
 ## Interm Target
 ```{r Interm-heterogeneity, fig.width=10, fig.height=5, warning=FALSE, message=FALSE}
+library(fixest)
+library(dplyr)
+library(gt)
+library(grid)
+library(gridExtra)
+library(png)
 
 # Ensure Interim_Target_Year is numeric
 merged_data2 <- merged_data2 %>%
@@ -377,8 +471,8 @@ model_before_2000 <- feols(
 all_ci_vals <- c(confint(model_after_2000)[, 1:2], confint(model_before_2000)[, 1:2])
 y_range <- range(all_ci_vals)
 
-# Helper function to make iplot grobs with internal title
-iplot_to_grob <- function(model, main_title, col = "black", col.border = "black", ylim_range = NULL) {
+# Helper to create iplot grob (suppress title)
+iplot_to_grob <- function(model, col = "black", col.border = "black", ylim_range = NULL) {
   temp <- tempfile(fileext = ".png")
   png(temp, width = 800, height = 600)
 
@@ -386,7 +480,7 @@ iplot_to_grob <- function(model, main_title, col = "black", col.border = "black"
   xlim_range <- range(event_times[!event_times %in% c(-6, 5, 6)])
 
   iplot(model,
-        main = main_title,
+        main = "",
         xlab = "Years Since Pledge",
         ylab = "Estimated Effect on Stock Price",
         col = col,
@@ -396,7 +490,6 @@ iplot_to_grob <- function(model, main_title, col = "black", col.border = "black"
         ylim = ylim_range,
         cex = 2.5,
         lwd = 2.5,
-        cex.main = 2.2,
         cex.lab = 1.4,
         cex.axis = 1.2
   )
@@ -410,67 +503,95 @@ iplot_to_grob <- function(model, main_title, col = "black", col.border = "black"
 sky_blue <- "#87CEEB"
 bubblegum_pink <- "#FF69B4"
 
-# Create styled plots with titles embedded
-grob_after  <- iplot_to_grob(model_after_2000, "With Interim Target", sky_blue, sky_blue, y_range)
-grob_before <- iplot_to_grob(model_before_2000, "No Interim Target", bubblegum_pink, bubblegum_pink, y_range)
+# Create plot grobs
+grob_after_raw  <- iplot_to_grob(model_after_2000, col = sky_blue, col.border = sky_blue, ylim_range = y_range)
+grob_before_raw <- iplot_to_grob(model_before_2000, col = bubblegum_pink, col.border = bubblegum_pink, ylim_range = y_range)
 
-# ----- Tightly stacked layout -----
-library(grid)
-library(gridExtra)
+# Create tight titles
+title_after  <- textGrob("Interim Target", gp = gpar(fontsize = 16, fontface = "bold"), just = "center", vjust = 1)
+title_before <- textGrob("No Interim Target", gp = gpar(fontsize = 16, fontface = "bold"), just = "center", vjust = 1)
 
+# Combine each title + plot (tight spacing)
+panel_after <- arrangeGrob(title_after, grob_after_raw, ncol = 1, heights = unit(c(0.2, 10), "null"))
+panel_before <- arrangeGrob(title_before, grob_before_raw, ncol = 1, heights = unit(c(0.2, 10), "null"))
+
+# Final figure layout
 main_title <- textGrob("Figure 3: Interim Target Heterogeneity", gp = gpar(fontsize = 18, fontface = "bold"))
-plots_row  <- arrangeGrob(grob_after, grob_before, ncol = 2)
+plots_row <- arrangeGrob(panel_after, panel_before, ncol = 2)
+final_layout <- arrangeGrob(main_title, plots_row, ncol = 1, heights = unit(c(0.8, 10), "null"))
 
-# Stack title + plots with tighter spacing
-final_layout <- arrangeGrob(
-  main_title,
-  plots_row,
-  ncol = 1,
-  heights = unit(c(0.8, 10), "null")  # control spacing here
-)
-
-# Render layout
+# Render figure
 grid.newpage()
 grid.draw(final_layout)
 
-# --- Helper: Extract and reshape DiD estimates ---
-extract_did_interim <- function(model, label) {
+# ---- Table section ----
+
+# Define light background colors
+colors <- c(
+  "Interim Target" = "#cce5f5",
+  "No Interim Target" = "#fcd6e3"
+)
+
+group_order <- c("Interim Target", "No Interim Target")
+
+# Extract post-treatment estimates
+extract_vertical_interim <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
-    filter(!term %in% c("Year.x::-6", "Year.x::5", "Year.x::6")) %>%
+    mutate(event_time = as.numeric(gsub("Year.x::", "", term))) %>%
+    filter(event_time >= 0) %>%
     mutate(
-      event_time = gsub("Year.x::", "Year ", term),
-      estimate = sprintf("%.2f", estimate),
-      std.error = sprintf("(%.2f)", std.error)
+      Group = label,
+      Year = as.character(event_time),
+      Estimate = sprintf("%.2f", estimate),
+      SE = sprintf("(%.2f)", std.error)
     ) %>%
-    select(event_time, estimate, std.error) %>%
-    pivot_longer(cols = c("estimate", std.error), names_to = "stat", values_to = "value") %>%
-    mutate(row_label = ifelse(stat == "estimate", label, paste(label, "SE"))) %>%
-    select(row_label, event_time, value)
+    select(Group, Year, Estimate, SE)
 }
 
-# Extract table data
-table_after_2000  <- extract_did_interim(model_after_2000, "Interim Target")
-table_before_2000 <- extract_did_interim(model_before_2000, "No Interim Target")
+# Combine and style table
+interim_table <- bind_rows(
+  extract_vertical_interim(model_after_2000, "Interim Target"),
+  extract_vertical_interim(model_before_2000, "No Interim Target")
+) %>%
+  arrange(factor(Group, levels = group_order), as.numeric(Year)) %>%
+  group_by(Group) %>%
+  mutate(Group = ifelse(row_number() == 1, Group, "")) %>%
+  ungroup()
 
-# Combine and display
-interim_combined_table <- bind_rows(table_after_2000, table_before_2000) %>%
-  pivot_wider(names_from = event_time, values_from = value)
-
-gt(interim_combined_table) %>%
-  tab_header(title = "Table 3: Stock Price Impact by Interim Target Year") %>%
+gt_table <- gt(interim_table) %>%
+  tab_header(
+    title = md("**Table 6. Stock Price Effects by Interim Target Group**"),
+    subtitle = "Post-Treatment Estimates Only (Years ≥ 0)"
+  ) %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_column_labels(everything())
   )
 
+# Apply row shading
+for (i in seq_len(nrow(interim_table))) {
+  original_group <- ifelse(interim_table$Group[i] != "", interim_table$Group[i],
+                           interim_table$Group[max(which(interim_table$Group[1:i] != ""))])
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = colors[original_group]),
+      locations = cells_body(rows = i)
+    )
+}
+
+# Display final styled table
+gt_table
+
 ```
-
-
-
-
-## Net Zero Complete-By
 ```{r final-year-heterogeneity, fig.width=10, fig.height=5, warning=FALSE, message=FALSE}
+
+library(fixest)
+library(dplyr)
+library(gt)
+library(grid)
+library(gridExtra)
+library(png)
 
 # Ensure Net_Zero_Year is numeric
 merged_data2 <- merged_data2 %>%
@@ -499,16 +620,16 @@ model_nz_after <- feols(
 all_ci_vals <- c(confint(model_nz_before)[, 1:2], confint(model_nz_after)[, 1:2])
 y_range <- range(all_ci_vals)
 
-# Updated iplot_to_grob function
-iplot_to_grob <- function(model, main_title, col = "black", col.border = "black", ylim_range = NULL) {
+# iplot-to-grob function (with no internal title)
+iplot_to_grob <- function(model, col = "black", col.border = "black", ylim_range = NULL) {
   temp <- tempfile(fileext = ".png")
-  png(temp, width = 800, height = 600)
-
+  png(temp, width = 1600, height = 1200, res = 200)
+  
   event_times <- as.numeric(gsub("Year.x::", "", names(coef(model))))
   xlim_range <- range(event_times[!event_times %in% c(-6, -5, 5, 6)])
-
+  
   iplot(model,
-        main = main_title,
+        main = "",  # external titles instead
         xlab = "Years Since Pledge",
         ylab = "Estimated Effect on Stock Price",
         col = col,
@@ -518,69 +639,110 @@ iplot_to_grob <- function(model, main_title, col = "black", col.border = "black"
         ylim = ylim_range,
         cex = 2.5,
         lwd = 2.5,
-        cex.main = 2.2,
-        cex.lab = 1.4,
-        cex.axis = 1.2
+        cex.lab = 1.6,
+        cex.axis = 1.4
   )
-
+  
   dev.off()
   img <- png::readPNG(temp)
-  grid::rasterGrob(img, interpolate = TRUE)
+  grid::rasterGrob(img, interpolate = TRUE, width = unit(1, "npc"), height = unit(1, "npc"))
 }
 
-# Pick two new colors
+# Colors
 deep_orange <- "#FF7F50"
 rich_purple <- "#9370DB"
 
-# Create grobs
-grob_nz_before <- iplot_to_grob(model_nz_before, "Net Zero Year ≤ 2035", col = deep_orange, col.border = deep_orange, ylim_range = y_range)
-grob_nz_after  <- iplot_to_grob(model_nz_after,  "Net Zero Year > 2035", col = rich_purple, col.border = rich_purple, ylim_range = y_range)
+# Create plot grobs
+grob_nz_before <- iplot_to_grob(model_nz_before, col = deep_orange, col.border = deep_orange, ylim_range = y_range)
+grob_nz_after  <- iplot_to_grob(model_nz_after,  col = rich_purple, col.border = rich_purple, ylim_range = y_range)
 
-# Layout title + plots with minimal spacing
-library(grid)
-library(gridExtra)
+# External titles
+title_nz_before <- textGrob("Net Zero Year ≤ 2035", gp = gpar(fontsize = 16, fontface = "bold"))
+title_nz_after  <- textGrob("Net Zero Year > 2035",  gp = gpar(fontsize = 16, fontface = "bold"))
 
-main_title <- textGrob("Figure 4: Net Zero Target Year Heterogeneity", gp = gpar(fontsize = 18, fontface = "bold"))
-plots_row  <- arrangeGrob(grob_nz_before, grob_nz_after, ncol = 2)
-
-final_layout <- arrangeGrob(
-  main_title,
-  plots_row,
+# Combine each title + plot
+panel_before <- arrangeGrob(
+  textGrob(" ", gp = gpar(fontsize = 6)),  # spacer
+  title_nz_before,
+  grob_nz_before,
   ncol = 1,
-  heights = unit(c(0.8, 10), "null")  # Reduce spacing above plots
+  heights = unit(c(0.2, 0.8, 10), "null")
 )
 
+panel_after <- arrangeGrob(
+  textGrob(" ", gp = gpar(fontsize = 6)),
+  title_nz_after,
+  grob_nz_after,
+  ncol = 1,
+  heights = unit(c(0.2, 0.8, 10), "null")
+)
+
+# Final layout
+main_title <- textGrob("Figure 4: Net Zero Target Year Heterogeneity", gp = gpar(fontsize = 18, fontface = "bold"))
+plots_row  <- arrangeGrob(panel_before, panel_after, ncol = 2)
+final_layout <- arrangeGrob(main_title, plots_row, ncol = 1, heights = unit(c(0.8, 10), "null"))
+
+# Render figure
 grid.newpage()
 grid.draw(final_layout)
 
-# --- Table ---
-extract_did <- function(model, label) {
+# Color coding for table
+colors <- c(
+  "Net Zero ≤ 2035" = "#ffe5d0",   # light orange
+  "Net Zero > 2035" = "#e0d3f5"    # light purple
+)
+group_order <- c("Net Zero ≤ 2035", "Net Zero > 2035")
+
+# Extract post-treatment estimates in vertical layout
+extract_vertical_nz <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
-    filter(!term %in% c("Year.x::-6", "Year.x::-5", "Year.x::5", "Year.x::6")) %>%
+    mutate(event_time = as.numeric(gsub("Year.x::", "", term))) %>%
+    filter(event_time >= 0) %>%
     mutate(
-      event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
-      estimate = sprintf("%.2f", estimate),
-      std.error = sprintf("(%.2f)", std.error)
+      Group = label,
+      Year = as.character(event_time),
+      Estimate = sprintf("%.2f", estimate),
+      SE = sprintf("(%.2f)", std.error)
     ) %>%
-    select(event_time, estimate, std.error) %>%
-    pivot_longer(cols = c("estimate", std.error), names_to = "stat", values_to = "value") %>%
-    mutate(row_label = ifelse(stat == "estimate", label, paste(label, "SE"))) %>%
-    select(row_label, event_time, value)
+    select(Group, Year, Estimate, SE)
 }
 
-# Extract
-table_nz_before <- extract_did(model_nz_before, "Net Zero ≤ 2035")
-table_nz_after  <- extract_did(model_nz_after,  "Net Zero > 2035")
+# Combine
+nz_table <- bind_rows(
+  extract_vertical_nz(model_nz_before, "Net Zero ≤ 2035"),
+  extract_vertical_nz(model_nz_after,  "Net Zero > 2035")
+) %>%
+  arrange(factor(Group, levels = group_order), as.numeric(Year)) %>%
+  group_by(Group) %>%
+  mutate(Group = ifelse(row_number() == 1, Group, "")) %>%
+  ungroup()
 
-# Combine and display
-combined_table <- bind_rows(table_nz_before, table_nz_after) %>%
-  pivot_wider(names_from = event_time, values_from = value)
+# Build styled table
+gt_table <- gt(nz_table) %>%
+  tab_header(
+    title = md("**Table 7. Stock Price Effects by Net Zero Year**"),
+    subtitle = "Post-Treatment Estimates Only (Years ≥ 0)"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
 
-gt(combined_table) %>%
-  tab_header(title = "Table 4: Net Zero Target Year Heterogeneity (Staggered DiD Estimates)") %>%
-  tab_style(style = cell_text(weight = "bold"),
-            locations = cells_column_labels(everything()))
+# Apply row shading
+for (i in seq_len(nrow(nz_table))) {
+  original_group <- ifelse(nz_table$Group[i] != "", nz_table$Group[i],
+                           nz_table$Group[max(which(nz_table$Group[1:i] != ""))])
+  gt_table <- gt_table %>%
+    tab_style(
+      style = cell_fill(color = colors[original_group]),
+      locations = cells_body(rows = i)
+    )
+}
+
+# Display final table
+gt_table
+
 ```
 
 ## Accountability Heterogeniety

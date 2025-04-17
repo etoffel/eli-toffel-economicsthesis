@@ -94,99 +94,95 @@ pulled_together <- pulled_together %>%
 ```
 
 ## 3. Staggered DiDs
-```{r staggered-did-media}
+```{r media-coverage-did, fig.width=12, fig.height=5, warning=FALSE, message=FALSE}
 
-##Total Media Coverage
-staggered_did_total <- feols(Media_Articles_Total ~ sunab(Year.y, Year.x) | Unique_ID + Year.x,
-                       data = pulled_together)
-summary(staggered_did_total)
+library(fixest)
+library(dplyr)
+library(gt)
+library(gridExtra)
+library(grid)
+library(png)
+library(broom)
+library(tidyr)
+library(ggplot2)
 
-iplot(staggered_did_total, main = "Staggered DiD: Media Articles", xlab = "Years Since Pledge")
-
-## Percent_Negative_Business Staggered DiD
-staggered_did_bus <- feols(Percent_Negative_Business ~ sunab(Year.y, Year.x) | Unique_ID + Year.x, 
-                       data = pulled_together)
-
-summary(staggered_did_bus)
-
-iplot(staggered_did_bus, main = "Staggered DiD: Negative Business Media Articles", xlab = "Years Since Pledge")
-
-## Percent_Negative_Personal Staggered DiD
-staggered_did_pers <- feols(Percent_Negative_Personal ~ sunab(Year.y, Year.x)| Unique_ID + Year.x, 
-                       data = pulled_together)
-
-summary(staggered_did_pers)
-
-iplot(staggered_did_pers, main = "Staggered DiD: Negative Personal Media Articles", xlab = "Years Since Pledge")
-
-## Plotting Side By Side
-# Helper: Run model
+# --- Run models ---
 run_did_model <- function(outcome_var, label) {
   formula <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
   model <- feols(formula, data = pulled_together)
   return(list(model = model, label = label))
 }
 
-# Helper: Convert iplot to grob
+# --- Convert iplot to grob ---
 iplot_to_grob <- function(model, main_title) {
-  grid.newpage()
   temp <- tempfile(fileext = ".png")
-  png(temp, width = 800, height = 600)
-  iplot(model, main = main_title, xlab = "Years Since Pledge", ylab = "Estimated Effect")
+  png(temp, width = 1000, height = 800, res = 150)
+  iplot(model,
+        main = main_title,
+        xlab = "Years Since Pledge",
+        ylab = "Estimated Effect")
   dev.off()
   img <- png::readPNG(temp)
-  rasterGrob(img, interpolate = TRUE)
+  grid::rasterGrob(img, interpolate = TRUE, width = unit(1, "npc"), height = unit(1, "npc"))
 }
 
-# Run models
+# Run all three models
 total_model <- run_did_model("Media_Articles_Total", "Total Media")
 bus_model   <- run_did_model("Percent_Negative_Business", "Negative Business")
 pers_model  <- run_did_model("Percent_Negative_Personal", "Negative Personal")
 
-# Create grobs
+# Generate grobs
 grob_total <- iplot_to_grob(total_model$model, total_model$label)
 grob_bus   <- iplot_to_grob(bus_model$model, bus_model$label)
 grob_pers  <- iplot_to_grob(pers_model$model, pers_model$label)
 
-# Combine in a grid
+# Combine plots
 grid.arrange(
   grobs = list(grob_total, grob_bus, grob_pers),
   ncol = 3,
-  top = textGrob("Figure X: Staggered DiD - Media Coverage", gp = gpar(fontsize = 14, fontface = "bold")),
+  top = textGrob("Figure A1: Staggered DiD – Media Coverage", gp = gpar(fontsize = 16, fontface = "bold")),
   padding = unit(0.5, "line")
 )
 
-## Tabling
-# Helper to extract DiD terms
+# --- Table: Post-treatment only (event_time ≥ 0) ---
 extract_did <- function(model, label) {
   tidy(model) %>%
     filter(grepl("Year.x::", term)) %>%
     mutate(
-      event_time = gsub("Year.x::(-?\\d+)", "Year \\1", term),
+      event_time = as.numeric(gsub("Year.x::", "", term))
+    ) %>%
+    filter(event_time >= 0) %>%  # Post-treatment only
+    mutate(
+      year_label = paste0("Year ", event_time),
       estimate = round(estimate, 2),
       std.error = round(std.error, 2)
     ) %>%
-    select(event_time, estimate, std.error) %>%
+    select(year_label, estimate, std.error) %>%
     pivot_longer(cols = c(estimate, std.error), names_to = "type", values_to = "value") %>%
     mutate(row_label = ifelse(type == "estimate", label, paste(label, "SE"))) %>%
-    select(row_label, event_time, value)
+    select(row_label, year_label, value)
 }
 
-# Extract and combine
+# Extract each model
 table_total <- extract_did(total_model$model, total_model$label)
-table_bus   <- extract_did(bus_model$model, bus_model$label)
-table_pers  <- extract_did(pers_model$model, pers_model$label)
+table_bus   <- extract_did(bus_model$model,   bus_model$label)
+table_pers  <- extract_did(pers_model$model,  pers_model$label)
 
+# Combine and pivot
 combined_table <- bind_rows(table_total, table_bus, table_pers) %>%
-  pivot_wider(names_from = event_time, values_from = value)
+  pivot_wider(names_from = year_label, values_from = value)
 
 # Display table
 gt(combined_table) %>%
-  tab_header(title = "Table 6. Media Coverage (Staggered DiD Estimates)") %>%
+  tab_header(
+    title = md("**Table A1. Media Coverage Effects (Staggered DiD)**"),
+    subtitle = "Post-Treatment Years Only (Years ≥ 0)"
+  ) %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_column_labels(everything())
   )
+
 ```
 ## 4. Carbon Credit Heterogeneity (Combined)
 ```{r carbon-credit-did-9plots-percent-negatives, warning=FALSE, message=FALSE, fig.width=9, fig.height=9}
@@ -397,23 +393,18 @@ gt(combined_table) %>%
 
 ```
 ## Net Zero Year Heterogeneity – Staggered DiD on Media Outcomes
-```{r net-zero-year-heterogeneity-media, fig.width=8, fig.height=5, warning=FALSE, message=FALSE}
+```{r net-zero-year-heterogeneity-media, fig.width=12, fig.height=9, warning=FALSE, message=FALSE}
+
+library(fixest)
+library(dplyr)
+library(gridExtra)
+library(grid)
+library(png)
+library(broom)
+
 # Ensure Net_Zero_Year is numeric
 pulled_together <- pulled_together %>%
   mutate(Net_Zero_Year = as.numeric(Net_Zero_Year))
-
-# Helper function to run DiD and plot
-run_nz_did_plot <- function(data, outcome_var, label, group_desc) {
-  fml <- as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x"))
-  model <- feols(fml, data = data)
-  
-  iplot(
-    model,
-    main = paste("Staggered DiD:", label, "- Net Zero Year", group_desc),
-    xlab = "Years Since Pledge",
-    ylab = paste("Effect on", label)
-  )
-}
 
 # Define outcomes and labels
 outcomes <- list(
@@ -422,22 +413,130 @@ outcomes <- list(
   Percent_Negative_Personal = "% Negative Personal Articles"
 )
 
-# Loop through outcomes and Net Zero Year groups
+# Define plotting function
+iplot_to_grob <- function(model, title) {
+  temp <- tempfile(fileext = ".png")
+  png(temp, width = 1000, height = 800, res = 150)
+  iplot(
+    model,
+    main = title,
+    xlab = "Years Since Pledge",
+    ylab = "Estimated Effect"
+  )
+  dev.off()
+  img <- png::readPNG(temp)
+  rasterGrob(img, interpolate = TRUE, width = unit(1, "npc"), height = unit(1, "npc"))
+}
+
+# Initialize list to store all grobs
+all_grobs <- list()
+
+# Loop over outcomes and Net Zero groups
 for (outcome_var in names(outcomes)) {
   label <- outcomes[[outcome_var]]
   
-  # Group: Net_Zero_Year ≤ 2035 or untreated
-  subset_nz_before_2035 <- pulled_together %>%
+  # Subset for Net Zero Year ≤ 2035 or untreated
+  data_before <- pulled_together %>%
     filter((Treated == 1 & Net_Zero_Year <= 2035) | Treated == 0)
+  model_before <- feols(as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x")),
+                        data = data_before)
+  grob_before <- iplot_to_grob(model_before, paste(label, "\nNet Zero Year ≤ 2035"))
+  all_grobs[[length(all_grobs) + 1]] <- grob_before
   
-  run_nz_did_plot(subset_nz_before_2035, outcome_var, label, "≤ 2035")
-  
-  # Group: Net_Zero_Year > 2035 or untreated
-  subset_nz_after_2035 <- pulled_together %>%
+  # Subset for Net Zero Year > 2035 or untreated
+  data_after <- pulled_together %>%
     filter((Treated == 1 & Net_Zero_Year > 2035) | Treated == 0)
-  
-  run_nz_did_plot(subset_nz_after_2035, outcome_var, label, "> 2035")
+  model_after <- feols(as.formula(paste0(outcome_var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x")),
+                       data = data_after)
+  grob_after <- iplot_to_grob(model_after, paste(label, "\nNet Zero Year > 2035"))
+  all_grobs[[length(all_grobs) + 1]] <- grob_after
 }
+
+# Arrange in 3x2 grid (3 outcomes × 2 groups)
+grid.arrange(
+  grobs = all_grobs,
+  ncol = 2,
+  top = textGrob("Figure A2: Media Coverage Heterogeneity by Net Zero Target Year",
+                 gp = gpar(fontsize = 16, fontface = "bold"))
+)
+
+# --- Table: Years 0, 1, and 2 only ---
+extract_did <- function(model, label) {
+  tidy(model) %>%
+    filter(grepl("Year.x::", term)) %>%
+    mutate(
+      event_time = as.numeric(gsub("Year.x::", "", term))
+    ) %>%
+    filter(event_time %in% c(0, 1, 2)) %>%  # ← Only keep Year 0–2
+    mutate(
+      year_label = paste0("Year ", event_time),
+      estimate = round(estimate, 2),
+      std.error = round(std.error, 2)
+    ) %>%
+    select(year_label, estimate, std.error) %>%
+    pivot_longer(cols = c(estimate, std.error), names_to = "type", values_to = "value") %>%
+    mutate(row_label = ifelse(type == "estimate", label, paste(label, "SE"))) %>%
+    select(row_label, year_label, value)
+}
+
+# Define outcome labels
+outcomes <- list(
+  Media_Articles_Total = "Total Media Articles",
+  Percent_Negative_Business = "% Negative Business Articles",
+  Percent_Negative_Personal = "% Negative Personal Articles"
+)
+
+# Define model runner
+run_nz_model <- function(var, data_filter, label) {
+  model <- feols(as.formula(paste0(var, " ~ sunab(Year.y, Year.x) | Unique_ID + Year.x")), data = data_filter)
+  return(list(model = model, label = label))
+}
+
+# Subset groups
+subset_nz_before <- pulled_together %>%
+  filter((Treated == 1 & Net_Zero_Year <= 2035) | Treated == 0)
+
+subset_nz_after <- pulled_together %>%
+  filter((Treated == 1 & Net_Zero_Year > 2035) | Treated == 0)
+
+# Run and label models
+total_model_before <- run_nz_model("Media_Articles_Total", subset_nz_before, "Total Media ≤ 2035")
+total_model_after  <- run_nz_model("Media_Articles_Total", subset_nz_after,  "Total Media > 2035")
+
+bus_model_before   <- run_nz_model("Percent_Negative_Business", subset_nz_before, "% Negative Business ≤ 2035")
+bus_model_after    <- run_nz_model("Percent_Negative_Business", subset_nz_after,  "% Negative Business > 2035")
+
+pers_model_before  <- run_nz_model("Percent_Negative_Personal", subset_nz_before, "% Negative Personal ≤ 2035")
+pers_model_after   <- run_nz_model("Percent_Negative_Personal", subset_nz_after,  "% Negative Personal > 2035")
+
+# Extract and format
+table_total_before <- extract_did(total_model_before$model, total_model_before$label)
+table_total_after  <- extract_did(total_model_after$model,  total_model_after$label)
+
+table_bus_before   <- extract_did(bus_model_before$model,   bus_model_before$label)
+table_bus_after    <- extract_did(bus_model_after$model,    bus_model_after$label)
+
+table_pers_before  <- extract_did(pers_model_before$model,  pers_model_before$label)
+table_pers_after   <- extract_did(pers_model_after$model,   pers_model_after$label)
+
+# Combine
+combined_table <- bind_rows(
+  table_total_before, table_total_after,
+  table_bus_before, table_bus_after,
+  table_pers_before, table_pers_after
+) %>%
+  pivot_wider(names_from = year_label, values_from = value)
+
+# Display with gt
+gt(combined_table) %>%
+  tab_header(
+    title = md("**Table A2. Media Coverage Effects by Net Zero Target Year**"),
+    subtitle = "Years 0 to 2 Only (Pledge Year and Two Years After)"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
 
 ```
 ## 5. Accountability Heterogeneity – Staggered DiD by Media Outcomes
