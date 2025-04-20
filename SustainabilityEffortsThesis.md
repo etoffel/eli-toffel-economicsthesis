@@ -1,8 +1,8 @@
-# Undergraduate thesis: The Economy (Taylor's Version): Pop Concerts Helped The Economy Shake Off a Pandemic Slump
+# Undergraduate thesis: Praise or Panic? Investor Reactions to Corporate Carbon Neutral Pledges
 
 ## Project Overview
 
-This project explores the effects of a Taylor Swift concert on local business traffic and sales. It utilizes data from taylorswift.com to index her concert dates and locations, and merges this information with local business data on traffic and sales. 
+This project examines corporate sustainability promises by analyzing the impact of carbon-neutral pledging on companies’ average yearly stock prices. 
 
 The project consists of two main parts: data collection and analysis. Initially, the concert dates and locations are scraped from taylorswift.com using web scraping techniques. The local business data on traffic and sales is collected from various sources. The collected data is then cleaned and merged to create a unified dataset for analysis. The analysis is performed using R, and the findings are documented in an RMarkdown report. 
 
