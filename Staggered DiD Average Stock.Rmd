@@ -12,7 +12,6 @@ source("housekeeping.R")
 
 carbon_neutral <- read_csv("data/Build 2/Carbon Neutral Pledging Data.csv")
 stock_data <- read_csv("data/Build 2/Stock Data.csv")
-revenue_data <- read_csv("data/Build 2/Revenue Data.csv")
 
 # Fix Unique ID for Burger King
 stock_data <- stock_data %>% mutate(`Unique ID` = ifelse(Company == "Burger King", 69, `Unique ID`))
@@ -174,11 +173,34 @@ table_data %>%
     formatter = fmt_number,
     decimals = 0
   )
-
+View(merged_data2)
 ```
 
 ```{r Summary Stats}
 
+# Step 1: Build treated_summary
+treated_summary <- merged_data2 %>%
+  filter(Treated == 1) %>%                         # Only treated firms
+  arrange(Unique_ID, Year.x) %>%                    # Sort by Unique_ID and year
+  group_by(Unique_ID) %>%
+  slice(1) %>%                                      # Only first row per firm
+  ungroup() %>%
+  mutate(
+    Has_Interim_Target = ifelse(!is.na(Interim_Target_Year) & Interim_Target_Year != 0, "Yes", "No"), # Handle interim properly
+    Carbon_Credits = case_when(
+      Carbon_Credits %in% c("Yes", "No") ~ Carbon_Credits,
+      TRUE ~ "Not Specified"
+    )
+  ) %>%
+  group_by(Carbon_Credits, Has_Interim_Target) %>%
+  summarize(
+    Firms = n(),                                      # Firm count
+    `Avg Pledge Year` = round(mean(Year.y, na.rm = TRUE)),  # Avg Pledge Year (Year.y)
+    `Avg Net Zero Year` = round(mean(Net_Zero_Year, na.rm = TRUE)), # Avg Completion
+    .groups = "drop"
+  )
+
+# Step 2: Build the gt table
 treated_summary %>%
   gt() %>%
   tab_header(
@@ -187,13 +209,13 @@ treated_summary %>%
   ) %>%
   cols_label(
     Carbon_Credits = "Carbon Credits",
-    Count = "Firms",
-    Has_Interim = "Has Interim Target?",
+    Firms = "Firms",
+    Has_Interim_Target = "Has Interim Target?",
     `Avg Pledge Year` = "Avg Pledge Year",
     `Avg Net Zero Year` = "Avg Completion Date"
   ) %>%
-  cols_move(columns = Count, after = Carbon_Credits) %>%
-  cols_move(columns = Has_Interim, after = Count) %>%
+  cols_move(columns = Firms, after = Carbon_Credits) %>%
+  cols_move(columns = Has_Interim_Target, after = Firms) %>%
   fmt_number(
     columns = c(`Avg Pledge Year`, `Avg Net Zero Year`),
     decimals = 0,
@@ -204,24 +226,21 @@ treated_summary %>%
     locations = cells_column_labels(everything())
   ) %>%
   tab_style(
-    style = list(cell_fill(color = colors["Not Specified"])),
+    style = list(cell_fill(color = "#E0E0E0")),
     locations = cells_body(rows = Carbon_Credits == "Not Specified")
   ) %>%
   tab_style(
-    style = list(cell_fill(color = colors["No"])),
+    style = list(cell_fill(color = "#B2DFDB")),
     locations = cells_body(rows = Carbon_Credits == "No")
   ) %>%
   tab_style(
-    style = list(cell_fill(color = colors["Yes"])),
+    style = list(cell_fill(color = "#FFCCBC")),
     locations = cells_body(rows = Carbon_Credits == "Yes")
   )
-
 
 ```
 
 View(merged_data2)
-
-
 
 ## 4. Run Staggered DiD Model
 ```{r Staggered DiD}

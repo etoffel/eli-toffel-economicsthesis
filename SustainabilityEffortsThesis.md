@@ -4,84 +4,44 @@
 
 This project examines corporate sustainability promises by analyzing the impact of carbon-neutral pledging on companies’ average yearly stock prices. 
 
-The project consists of two main parts: data collection and analysis. Initially, the concert dates and locations are scraped from taylorswift.com using web scraping techniques. The local business data on traffic and sales is collected from various sources. The collected data is then cleaned and merged to create a unified dataset for analysis. The analysis is performed using R, and the findings are documented in an RMarkdown report. 
+The project consists of two main parts: data collection and analysis. Initially, a sample of the most visible companies are scraped from the Axios Harris Poll 100 from 2019-2024 using web scraping techniques. Stock data from public companies are scraped from Macrotrends, and media data is scraped from Nexis Uni searches. Lastly, carbon neutral pledge data is collected from Carbon Neutral Tracker. 98 companies appeared in the Axios Harris Poll for more than one year and also were listed in the carbon neutral tracker dataset. Media data was scraped for the 98 companies and stock data was scraped for all the public companies, which were 80 of the 98. that. These scraped datasets were inputted into R under 'Data/Build 2'. Raw data for the original Axios Harris Poll scrape and Carbon Neutral tracker is listed under 'Data/raw'. The collected data is then merged to create a unified dataset for analysis. 
 
-To replicate the project, an internet connection and access to R are required. Running the code files in order will generate the final report. It is important to run the scripts before attempting to knit the RMarkdown document.
-
-## Steps to Replicate
-
-_Note: See below for version that uses Stata instead._
-
-### Setting up the project
-
-1. Clone this repository to your local machine. (Alternatively, fork and clone the repository if you would like to suggest changes.)
-2. Set your working directory to the main project folder. All file paths are set relative to this folder.
+To replicate the project, an internet connection and access to R are required. Running the code files in order will generate the final report.
 
 ### Running scripts (R versions)
+Run in this order: 
+1. Run code/processing/merging/PullingTogether.R
+2. Run Staggered DiD Average Stock.Rmd
+3. Media Staggered DiD and Heterogeniety.Rmd' 
 
-1. The file that runs all other files is `main_script.R`. Run this file to execute all other scripts in the correct order.
-2. `main_script.R` first builds the data using numbered scripts in the build folder. Inside each scripts there is a docstring with additional information on what they do and what to run next. Follow the numbers and run the scripts in order. The scripts will download and clean the data.
-3. After running all files in build, `main_script.R` runs the analysis folder (within the code folder) scripts. The scripts in analysis are numbered, but they can be run in any order. All are based on variations of the final data created in build. Ideally, all should run in the process of knitting the RMarkdown, so they do not need to be run individually. Currently the relative file paths are set to run in the RMarkdown file, so they would need to be altered to reflect a different working directory.
-4. Knit the RMarkdown. This will produce the final paper by combining all of the other RMarkdown files from the draft folder. The RMarkdown final draft can be found in the final folder within the writing folder.
-
-### Running scripts (Stata version)
-
-1. The file that runs all other files is `main_script.do`. Run this file to execute all other scripts in the correct order.
-2. `main_script.do` first builds the data using numbered scripts in the build folder. Inside each script, there is a docstring with additional information on what they do and what to run next. Follow the numbers and run the scripts in order. The scripts will download and clean the data.
-3. After running all files in build, `main_script.do` runs the analysis folder (within the code folder) scripts. The scripts in analysis are numbered, but they can be run in any order. All are based on variations of the final data created in build. Ideally, all should run in the process of knitting the .tex file, so they do not need to be run individually. Currently, the relative file paths are set to run in the .tex file, so they would need to be altered to reflect a different working directory.
-4. Compile the .tex file. This will produce the final paper by combining all of the other .tex files from the draft folder. The .tex final draft can be found in the final folder within the writing folder.
-
-Important folder locations to know:
-
-- code, data, output, literature, presentations, writing are all folders within the main project folder.
-
-### Critical to replication:
-
-- code folder: build for scripts to build the data and analysis for scripts to analyze the data
-    - build: scripts to build the dataset for analysis
-    - analysis: scripts to analyze the data
-- data folder: raw for raw data, temp for various saves throughout building, clean for cleaned data, and final for final data
-    - raw: raw data
-    - temp: temporary data saves
-    - clean: cleaned data
-- output folder: figures for figures produced in analysis and tables for tables produced in analysis
-    - figures: figures produced in analysis
-    - tables: tables produced in analysis
+## Steps to Replicate
+To analyze carbon neutral effects on stock prices, run 'Staggered DiD Average Stock.Rmd'. 
+To analyze carbon neutral effects on media attention, run 'Media Staggered DiD and Heterogeniety.Rmd'. 
 
 ### Other folders:
 
-- literature folder: for any literature used in the project
-- presentations folder: for any presentations given on the project
-- writing folder: drafts for RMarkdown sections, final for the RMarkdown final draft.
+- presentations folder: Presentations given to create the project
+- writing folder: drafts for sections of the Final Paper
 housekeeping.r is an R script in the main directory that sets relative file paths and loads all packages. It is run at the beginning of all other R scripts.
-
-## Relevant files (R version, Stata version is similar)
-
-- `main_script.R` or `main_script.do`: runs all other scripts in the correct order
-- `housekeeping.r`: sets relative file paths and loads all packages
-- `code/build/clean_functions.R`
-- `analysis/analysis_functions.R`
-
-- `code/build/01_import_census.R`
-- `code/build/02_import_admin_data.R`
-
-- `code/build/03_clean_census.R`
-- `code/build/04_clean_admin_data.R`
-
-- `code/build/05_merge_census_admin.R`
-
-- `code/analysis/06_summary_stats.R`
-- `code/analysis/07_basic_regression.R`
-- `code/analysis/08_make_sum_figures.R`
-- `code/analysis/09_make_reg_figures.R`
-- `code/analysis/10_make_sum_tables.R`
-- `code/analysis/11_make_reg_tables.R`
 
 ### Data sources
 
 Here are the main data sources in the data project. Descriptions to come! 
 
-- taylorswift.com: concert dates and locations
-- Yelp scrapes: traffic and sales
-- Google Maps mobility data: traffic
-- International database of daily sales tax payment records: sales data from local businesses
+- Axios Harris Poll 100 2019-2024
+The Axios Harris 100 poll of corporate reputations, March 6, 2019. https://www.axios.com/2019/03/06/axios-harris-poll-corporate-reputations.
+The 2020 Axios Harris Poll 100 reputation rankings, July 30, 2020. https://www.axios.com/2020/07/30/axios-harris-poll-corporate-reputations-2020.
+The 2021 Axios Harris Poll 100 reputation rankings, May 13, 2021. https://www.axios.com/2021/05/13/the-2021-axios-harris-poll-100-reputation-rankings.
+The 2022 Axios Harris Poll 100 reputation rankings, May 24, 2022. https://www.axios.com/2022/05/24/2022-axios-harris-poll-100-rankings.
+The 2023 Axios Harris Poll 100 reputation rankings, May 23, 2023. https://www.axios.com/2023/05/23/corporate-brands-reputation-america.
+The 2024 Axios Harris Poll 100 reputation rankings, May 22, 2024. https://www.axios.com/2024/05/22/axios-harris-poll-company-reputation-ranking-data-source.
+
+- Media Data
+Nexis Uni: https://advance-lexis-com.lprx.bates.edu/bisnexishome/?pdmfid=1519360&crid=86cffcd6-15f2-429e-b553-9228a0d54fab
+
+- Carbon Neutral Pledge Data
+John Lang, Camilla Hyslop, Diego Manya, Sybrig Smit, Peter Chalkley, John Bervin Galang, Frances Green, Thomas Hale, Frederic Hans, Nick Hay, Angel Hsu, Takeshi Kuramochi, Steve Smith. Net Zero Tracker. Energy and Climate Intelligence Unit, Data-Driven EnviroLab, NewClimate Institute, Oxford Net Zero. 2024.
+"Net Zero Targets among World’s Largest Companies Double, But..." Net Zero Tracker, June 12, 2023. https://zerotracker.net/insights/net-zero-targets-among-worlds-largest-companies-double-but-credibility-gaps-undermine-progress.
+
+- Stock Data
+The Long Term Perspective on Markets. Macrotrends. Accessed April 17, 2025. https://macrotrends.net/.
